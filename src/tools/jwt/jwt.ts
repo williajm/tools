@@ -86,6 +86,13 @@ const REGISTERED: Record<string, string> = {
   jti: 'JWT ID',
 };
 
+/**
+ * Largest NumericDate `new Date()` can represent, in seconds. Past this the
+ * Date is invalid and `toISOString()` throws rather than returning anything —
+ * which took out the whole tool when a token carried a wild `exp`.
+ */
+const MAX_EPOCH_SECONDS = 8.64e12;
+
 function formatEpoch(seconds: number): string {
   return new Date(seconds * 1000).toISOString();
 }
@@ -119,6 +126,17 @@ export function describeClaims(payload: Record<string, unknown>, nowMs = Date.no
       return;
     }
 
+    if (!Number.isFinite(raw)) {
+      notes.push({
+        claim,
+        label: REGISTERED[claim]!,
+        value: String(raw),
+        status: 'error',
+        detail: 'Must be a finite NumericDate. A JSON number too large to represent parses as Infinity.',
+      });
+      return;
+    }
+
     // A very common bug: milliseconds where seconds are required.
     const looksLikeMillis = raw > 1e11;
     if (looksLikeMillis) {
@@ -128,6 +146,20 @@ export function describeClaims(payload: Record<string, unknown>, nowMs = Date.no
         value: String(raw),
         status: 'error',
         detail: 'Looks like milliseconds. NumericDate is in seconds — this is ~1000x too large.',
+      });
+      return;
+    }
+
+    // Everything below formats the value as a date, which throws outside this
+    // range. The millisecond heuristic above already covers large positives, so
+    // in practice this is the guard for wildly negative values.
+    if (Math.abs(raw) > MAX_EPOCH_SECONDS) {
+      notes.push({
+        claim,
+        label: REGISTERED[claim]!,
+        value: String(raw),
+        status: 'error',
+        detail: 'Outside the range of dates that can be represented, so this cannot be a real time.',
       });
       return;
     }

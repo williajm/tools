@@ -8,10 +8,19 @@ import {
   decode,
   describeClaims,
   verify,
+  type AlgWarning,
+  type ClaimNote,
   type DecodedJwt,
   type KeyFormat,
   type VerifyResult,
 } from './jwt.ts';
+
+/** Everything derived from the token in one go, so it all shares one try/catch. */
+interface Analysis {
+  jwt: DecodedJwt;
+  algWarning: AlgWarning | null;
+  claims: ClaimNote[];
+}
 
 const KEY_FORMAT_NAMES: Record<KeyFormat, string> = {
   secret: 'Shared secret',
@@ -33,18 +42,30 @@ export function Jwt() {
   const [keyFormat, setKeyFormat] = useState<KeyFormat>('secret');
   const [keyInput, setKeyInput] = useState('');
 
-  const decoded = useMemo((): { ok: DecodedJwt } | { error: string } | null => {
+  // Interpretation runs inside the try alongside decoding, not after it. A
+  // pasted token is untrusted input, and anything that throws while a claim is
+  // being read would otherwise escape into render and blank the whole tool
+  // instead of showing an error next to the token that caused it.
+  const decoded = useMemo((): { ok: Analysis } | { error: string } | null => {
     if (!token.trim()) return null;
     try {
-      return { ok: decode(token) };
+      const jwt = decode(token);
+      return {
+        ok: {
+          jwt,
+          algWarning: checkAlgorithm(jwt.header),
+          claims: describeClaims(jwt.payload),
+        },
+      };
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };
     }
   }, [token]);
 
-  const jwt = decoded && 'ok' in decoded ? decoded.ok : null;
-  const algWarning = jwt ? checkAlgorithm(jwt.header) : null;
-  const claims = jwt ? describeClaims(jwt.payload) : [];
+  const analysis = decoded && 'ok' in decoded ? decoded.ok : null;
+  const jwt = analysis?.jwt ?? null;
+  const algWarning = analysis?.algWarning ?? null;
+  const claims = analysis?.claims ?? [];
 
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [verifying, setVerifying] = useState(false);

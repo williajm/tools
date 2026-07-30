@@ -141,6 +141,45 @@ describe('describeClaims', () => {
     const notes = describeClaims({ aud: ['a', 'b'], exp: 1_800_000_000 }, now);
     expect(notes.find((n) => n.claim === 'aud')!.value).toBe('a, b');
   });
+
+  // Regression: the millisecond heuristic only looked at large *positive*
+  // values, so a wildly negative NumericDate reached `new Date().toISOString()`,
+  // which throws RangeError. That escaped into render and blanked the tool.
+  describe('unrepresentable time claims', () => {
+    it('reports a wildly negative exp instead of throwing', () => {
+      const notes = describeClaims({ exp: -10_000_000_000_000 }, now);
+      const exp = notes.find((n) => n.claim === 'exp')!;
+      expect(exp.status).toBe('error');
+      expect(exp.detail).toMatch(/range of dates/);
+    });
+
+    it('reports a non-finite claim instead of throwing', () => {
+      // JSON.parse('{"exp":-1e400}') yields -Infinity, not a parse error.
+      const payload = JSON.parse('{"exp":-1e400}') as Record<string, unknown>;
+      expect(payload['exp']).toBe(-Infinity);
+      const notes = describeClaims(payload, now);
+      const exp = notes.find((n) => n.claim === 'exp')!;
+      expect(exp.status).toBe('error');
+      expect(exp.detail).toMatch(/finite/);
+    });
+
+    it('never throws for any time claim, however absurd', () => {
+      const absurd = [
+        -10_000_000_000_000, 1e400, -1e400, Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER,
+        8.64e12, -8.64e12, 8.64e12 + 1, -8.64e12 - 1, 0, -1,
+      ];
+      for (const value of absurd) {
+        for (const claim of ['exp', 'nbf', 'iat']) {
+          expect(() => describeClaims({ [claim]: value }, now)).not.toThrow();
+        }
+      }
+    });
+
+    it('still formats the largest representable date', () => {
+      const notes = describeClaims({ iat: -8.64e12 }, now);
+      expect(notes.find((n) => n.claim === 'iat')!.value).toMatch(/-271821/);
+    });
+  });
 });
 
 describe('verify', () => {
