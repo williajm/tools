@@ -41,19 +41,38 @@ test('the removed navigation is gone', async ({ page }) => {
   }
 });
 
-test('visiting a tool records nothing in localStorage', async ({ page }) => {
-  // Recents was the only thing that wrote there; the site should now store
-  // nothing on the machine at all.
+/**
+ * Removing recents left the site writing nothing to the machine. The theme
+ * toggle is the one thing that can write since, and only on an explicit choice —
+ * 'system' clears its key rather than storing the word — so simply using a tool
+ * must still leave storage untouched.
+ */
+test('using a tool records nothing in localStorage', async ({ page }) => {
+  const contents = () =>
+    page.evaluate(() =>
+      Object.fromEntries(
+        Array.from({ length: localStorage.length }, (_, i) => {
+          const key = localStorage.key(i)!;
+          return [key, localStorage.getItem(key)];
+        }),
+      ),
+    );
+
   await page.goto('./hash/');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Hash & HMAC');
+  await page.getByLabel('Input').fill('something to hash');
+  await expect(page.locator('pre.output')).not.toBeEmpty();
+  expect(await contents()).toEqual({});
 
-  const stored = await page.evaluate(() =>
-    Object.fromEntries(
-      Array.from({ length: localStorage.length }, (_, i) => {
-        const key = localStorage.key(i)!;
-        return [key, localStorage.getItem(key)];
-      }),
-    ),
-  );
-  expect(stored).toEqual({});
+  await page.goto('./');
+  expect(await contents()).toEqual({});
+
+  // Choosing a theme is the only thing that may write, and returning to the
+  // default must clear it again.
+  const toggle = page.locator('.theme-toggle');
+  await toggle.click();
+  expect(await contents()).toEqual({ 'tools:theme': 'light' });
+  await toggle.click();
+  await toggle.click();
+  expect(await contents()).toEqual({});
 });

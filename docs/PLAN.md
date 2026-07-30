@@ -37,6 +37,28 @@ isolation, which Pages cannot grant. Workarounds exist — `coi-serviceworker`,
 single-threaded builds, SQLite's `opfs-sahpool` VFS — but each carries a real
 trade-off. v1 sidesteps this entirely by staying pure JS.
 
+### The theme bootstrap is the one inline script, allowed by hash
+
+Light and dark both ship, driven by `prefers-color-scheme`, with a header toggle
+that overrides it via `data-theme` on `<html>`. The awkward part is applying a
+saved override *before the first paint*: anything waiting for the bundle shows a
+flash of the wrong palette on every navigation, and there is no CSS-only way to
+read stored state.
+
+That needs inline script in the head, which `script-src 'self'` forbids. Adding
+`'unsafe-inline'` for one line would forfeit the protection the site is built on,
+so `scripts/gen-pages.mjs` embeds the bootstrap and emits a `'sha256-…'` for it in
+the same pass — computed from the string it just wrote, so the two cannot drift.
+Verified that Vite leaves the script byte-identical through the build, and that
+every page's hash matches; `tests/e2e/smoke.spec.ts` asserts no page ever gains
+`'unsafe-inline'`.
+
+`storeTheme('system')` deletes its key rather than writing the word, so returning
+to the default leaves nothing behind — the site writes to the machine only for
+someone who actively picks a side. The `/licenses` page follows the OS only: it is
+generated outside Vite with `default-src 'none'`, and adding script there to carry
+a preference is not worth weakening that for a licence listing.
+
 ### The CSP rules out any dependency that generates code
 
 `script-src 'self'` carries no `'unsafe-eval'`, so `eval` and `new Function` both
