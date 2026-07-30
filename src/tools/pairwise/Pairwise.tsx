@@ -53,7 +53,13 @@ export function Pairwise() {
     [result, parsed.parameters, state.exportAs],
   );
 
-  const complete = result && result.coverage.missing.length === 0 && result.rows.length > 0;
+  // A skipped check has no missing tuples because nothing was examined, so
+  // completeness has to require that the check actually ran.
+  const complete =
+    result &&
+    !result.coverage.skipped &&
+    result.coverage.missing.length === 0 &&
+    result.rows.length > 0;
 
   return (
     <ToolShell slug="pairwise" wide>
@@ -115,18 +121,25 @@ export function Pairwise() {
 
         {result && !result.error && result.rows.length > 0 && (
           <>
-            <div class={complete ? 'note note--ok' : 'note note--error'}>
-              {complete ? '✓ ' : '✗ '}
-              <strong>
-                {result.rows.length} test cases
-              </strong>{' '}
-              cover {result.coverage.covered} of {result.coverage.total} reachable{' '}
-              {result.coverage.strength === 2 ? 'pairs' : `${result.coverage.strength}-tuples`}
-              {result.coverage.excluded > 0 && ` (${result.coverage.excluded} excluded by constraints)`}.
-              {' '}Exhaustive testing would need <strong>{exhaustive.toLocaleString()}</strong> —
-              a {(exhaustive / result.rows.length).toFixed(1)}× reduction. Theoretical minimum is{' '}
-              {result.lowerBound}.
-            </div>
+            {result.coverage.skipped ? (
+              <div class="note note--warn">
+                <strong>{result.rows.length} test cases</strong> generated, but coverage was not
+                verified. {result.coverage.skipped}
+              </div>
+            ) : (
+              <div class={complete ? 'note note--ok' : 'note note--error'}>
+                {complete ? '✓ ' : '✗ '}
+                <strong>
+                  {result.rows.length} test cases
+                </strong>{' '}
+                cover {result.coverage.covered} of {result.coverage.total} reachable{' '}
+                {result.coverage.strength === 2 ? 'pairs' : `${result.coverage.strength}-tuples`}
+                {result.coverage.excluded > 0 && ` (${result.coverage.excluded} excluded by constraints)`}.
+                {' '}Exhaustive testing would need <strong>{exhaustive.toLocaleString()}</strong> —
+                a {(exhaustive / result.rows.length).toFixed(1)}× reduction. Theoretical minimum is{' '}
+                {result.lowerBound}.
+              </div>
+            )}
 
             {result.coverage.missing.length > 0 && (
               <div class="note note--error small">

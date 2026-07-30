@@ -190,6 +190,11 @@ export interface Coverage {
   /** Tuples excluded by constraints, so legitimately absent. */
   excluded: number;
   missing: Tuple[];
+  /**
+   * Set when the check was too large to run, so nothing here was verified. The
+   * caller must say so rather than presenting zeroes as a clean result.
+   */
+  skipped?: string;
 }
 
 export interface GenerateResult {
@@ -255,6 +260,51 @@ export function isReachable(
   return search(0, pinned);
 }
 
+/**
+ * Ceiling on tuples enumerated for one coverage check.
+ *
+ * Coverage grows as C(params, strength) × values^strength, so it is the strength
+ * control rather than the input size that makes this explode: four parameters of
+ * a hundred values each is 100 million tuples at strength 4 against sixty
+ * thousand at strength 2. Materialising the former exhausts memory, and this all
+ * runs synchronously while rendering.
+ *
+ * A million tuples is a few hundred milliseconds and comfortably beyond any real
+ * test matrix, so the cap only ever bites on input that could not have been
+ * verified anyway.
+ */
+export const MAX_TUPLES = 1_000_000;
+
+/** C(n, k), computed rather than enumerated — the enumeration is what we are sizing. */
+function binomial(n: number, k: number): number {
+  if (k < 0 || k > n) return 0;
+  let result = 1;
+  for (let i = 1; i <= k; i++) result = (result * (n - k + i)) / i;
+  return Math.round(result);
+}
+
+/**
+ * Tuples a coverage check at this strength would enumerate, or `Infinity` when
+ * that is past the budget.
+ *
+ * Counted exactly where counting is itself cheap. Summing the per-combination
+ * products means walking the combinations, so the number of combinations is
+ * checked first — otherwise sizing the job costs as much as the job.
+ */
+export function tupleCount(parameters: Parameter[], strength: number): number {
+  const width = Math.min(strength, parameters.length);
+  if (width < 1) return 0;
+
+  if (binomial(parameters.length, width) > MAX_TUPLES) return Infinity;
+
+  let total = 0;
+  for (const indices of combinations(parameters.length, width)) {
+    total += indices.reduce((product, i) => product * parameters[i]!.values.length, 1);
+    if (total > MAX_TUPLES) return Infinity;
+  }
+  return total;
+}
+
 /** Every combination of `size` distinct parameters, as index lists. */
 function combinations(count: number, size: number): number[][] {
   const out: number[][] = [];
@@ -312,6 +362,20 @@ export function verifyCoverage(
 
   const width = Math.min(strength, parameters.length);
 
+  if (tupleCount(parameters, width) > MAX_TUPLES) {
+    return {
+      strength: width,
+      total: 0,
+      covered: 0,
+      excluded: 0,
+      missing: [],
+      skipped:
+        `Verifying ${width}-way coverage here would mean enumerating more than ` +
+        `${MAX_TUPLES.toLocaleString('en-GB')} combinations, which would exhaust memory. ` +
+        'Reduce the strength, or the number of values per parameter.',
+    };
+  }
+
   for (const indices of combinations(parameters.length, width)) {
     const chosen = indices.map((i) => parameters[i]!);
     for (const tuple of valueTuples(chosen)) {
@@ -330,15 +394,40 @@ export function verifyCoverage(
 }
 
 /**
- * No covering array can have fewer rows than the largest single combination it
- * has to cover, which is the product of the `strength` largest domains. At
- * strength 2 that is the familiar max |Vi| × |Vj|.
+ * No covering array can have fewer rows than the largest number of combinations
+ * one parameter group forces it to cover.
+ *
+ * The product of the `strength` largest domains is only that number when every
+ * combination is reachable. With exclusions it overstates: two binary factors
+ * with one pair forbidden have three reachable pairs and can be covered in three
+ * rows, but the unconstrained product says four — so the UI reported a minimum
+ * the matrix had already beaten. Count reachable combinations per group instead
+ * and take the largest.
  */
-export function lowerBoundRows(parameters: Parameter[], strength = 2): number {
+export function lowerBoundRows(
+  parameters: Parameter[],
+  strength = 2,
+  exclusions: Exclusion[] = [],
+): number {
   const width = Math.min(strength, parameters.length);
   if (width < 2) return 0;
+
   const sizes = parameters.map((p) => p.values.length).sort((a, b) => b - a);
-  return sizes.slice(0, width).reduce((product, size) => product * size, 1);
+  const unconstrained = sizes.slice(0, width).reduce((product, size) => product * size, 1);
+  // Without exclusions every combination is reachable, so skip the work. The
+  // budget check also keeps this from becoming the expensive path.
+  if (exclusions.length === 0 || tupleCount(parameters, width) > MAX_TUPLES) return unconstrained;
+
+  let bound = 0;
+  for (const indices of combinations(parameters.length, width)) {
+    const chosen = indices.map((i) => parameters[i]!);
+    let reachable = 0;
+    for (const tuple of valueTuples(chosen)) {
+      if (isReachable(parameters, tuple, exclusions)) reachable++;
+    }
+    bound = Math.max(bound, reachable);
+  }
+  return bound;
 }
 
 export function generateMatrix(
@@ -359,6 +448,20 @@ export function generateMatrix(
     return { ...empty, error: `Strength ${strength} needs at least ${strength} parameters.` };
   }
 
+  // Checked before generating, not just before verifying: the generator has to
+  // cover every one of these combinations, so a job too large to check is also
+  // too large to build, and both run synchronously during render.
+  const tuples = tupleCount(parameters, strength);
+  if (tuples > MAX_TUPLES) {
+    return {
+      ...empty,
+      error:
+        `This needs more than ${MAX_TUPLES.toLocaleString('en-GB')} ${strength}-way combinations, ` +
+        'which would exhaust memory before producing anything. Reduce the strength, the number of ' +
+        'parameters, or the values per parameter.',
+    };
+  }
+
   const factors: Record<string, string[]> = {};
   for (const p of parameters) factors[p.name] = p.values;
 
@@ -371,13 +474,13 @@ export function generateMatrix(
     return {
       rows,
       coverage: verifyCoverage(parameters, rows, exclusions, strength),
-      lowerBound: lowerBoundRows(parameters, strength),
+      lowerBound: lowerBoundRows(parameters, strength, exclusions),
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
       ...empty,
-      lowerBound: lowerBoundRows(parameters, strength),
+      lowerBound: lowerBoundRows(parameters, strength, exclusions),
       error: `Could not build a matrix: ${message}. Contradictory exclusions are the usual cause.`,
     };
   }

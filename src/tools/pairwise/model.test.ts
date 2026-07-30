@@ -4,6 +4,7 @@ import {
   exportMatrix,
   generateMatrix,
   isReachable,
+  tupleCount,
   lowerBoundRows,
   parse,
   parseExclusions,
@@ -364,5 +365,87 @@ describe('parse', () => {
   it('surfaces errors from both halves', () => {
     const result = parse('OS Windows', 'Nope=1, Bad=2');
     expect(result.errors.length).toBeGreaterThan(1);
+  });
+});
+
+/**
+ * Regression: enumeration grew as C(params, strength) x values^strength with no
+ * budget, synchronously during render. Four 100-value parameters at strength 4 is
+ * 100 million tuples, which exhausts memory before answering.
+ */
+describe('enumeration is bounded', () => {
+  const big = (n: number, v: number): Parameter[] =>
+    Array.from({ length: n }, (_, i) => ({
+      name: `P${i}`,
+      values: Array.from({ length: v }, (_, j) => `v${j}`),
+    }));
+
+  it('sizes the job without doing it', () => {
+    expect(tupleCount(big(4, 10), 2)).toBe(600);
+    expect(tupleCount(big(4, 10), 4)).toBe(10_000);
+    expect(tupleCount(big(4, 100), 4)).toBe(Infinity);
+    // Too many combinations even to enumerate while counting.
+    expect(tupleCount(big(400, 2), 4)).toBe(Infinity);
+  });
+
+  it('refuses to generate a matrix it could not verify, and says why', () => {
+    const result = generateMatrix(big(4, 100), [], 4);
+    expect(result.error).toMatch(/combinations/);
+    expect(result.rows).toEqual([]);
+  });
+
+  it('returns quickly rather than hanging on an oversized check', () => {
+    const started = performance.now();
+    const coverage = verifyCoverage(big(4, 100), [], [], 4);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(coverage.skipped).toMatch(/enumerating more than/);
+  });
+
+  it('never reports a skipped check as covered', () => {
+    const coverage = verifyCoverage(big(4, 100), [], [], 4);
+    expect(coverage.skipped).toBeTruthy();
+    expect(coverage.covered).toBe(0);
+    expect(coverage.total).toBe(0);
+    // missing is empty because nothing was examined, which is why `skipped`
+    // exists — the UI must not read this as complete.
+    expect(coverage.missing).toEqual([]);
+  });
+
+  it('still verifies a realistic matrix at full strength', () => {
+    const result = generateMatrix(big(6, 4), [], 3);
+    expect(result.error).toBeUndefined();
+    expect(result.coverage.skipped).toBeUndefined();
+    expect(result.coverage.missing).toEqual([]);
+  });
+});
+
+/**
+ * Regression: the lower bound always multiplied the largest domains, so with an
+ * exclusion it claimed a minimum the matrix had already beaten.
+ */
+describe('lowerBoundRows accounts for exclusions', () => {
+  const two: Parameter[] = [
+    { name: 'A', values: ['1', '2'] },
+    { name: 'B', values: ['1', '2'] },
+  ];
+
+  it('counts only reachable combinations', () => {
+    expect(lowerBoundRows(two, 2)).toBe(4);
+    const one: Exclusion[] = [
+      { terms: [{ name: 'A', value: '1' }, { name: 'B', value: '1' }], raw: 'A=1, B=1' },
+    ];
+    expect(lowerBoundRows(two, 2, one)).toBe(3);
+  });
+
+  it('is never beaten by the matrix it describes', () => {
+    const one: Exclusion[] = [
+      { terms: [{ name: 'A', value: '1' }, { name: 'B', value: '1' }], raw: 'A=1, B=1' },
+    ];
+    const result = generateMatrix(two, one);
+    expect(result.rows.length).toBeGreaterThanOrEqual(result.lowerBound);
+  });
+
+  it('is unchanged when there are no exclusions', () => {
+    expect(lowerBoundRows(two, 2, [])).toBe(lowerBoundRows(two, 2));
   });
 });
