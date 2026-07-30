@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="tools">
+  <!-- The ⌗ mark used in the topbar wordmark, drawn rather than typeset so it
+       renders identically without a font. -->
+  <rect width="64" height="64" rx="12" fill="#1b6b4f" />
+  <g stroke="#ffffff" stroke-width="6" stroke-linecap="round">
+    <path d="M24 14 L18 50" />
+    <path d="M44 14 L38 50" />
+    <path d="M13 25 H52" />
+    <path d="M11 39 H50" />
+  </g>
+</svg>
