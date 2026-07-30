@@ -40,6 +40,10 @@ export function useHashState<T>(initial: T): [T, (next: T) => void] {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
+  // A debounced write outliving the component would rewrite the URL of whatever
+  // replaced it.
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
   const update = useCallback((next: T) => {
     setState(next);
     // Debounced: typing in a textarea should not write a history entry per keystroke.

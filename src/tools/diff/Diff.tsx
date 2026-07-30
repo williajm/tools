@@ -107,7 +107,9 @@ export function Diff() {
       // Only a removal sitting opposite an addition is an edit worth marking.
       if (pair.left?.kind !== 'removed' || pair.right?.kind !== 'added') return pair;
 
-      const marked = wordSegments(pair.left.text, pair.right.text);
+      // Marked under the same options the line diff ran under, so the words
+      // highlighted agree with the lines that were called changed.
+      const marked = wordSegments(pair.left.text, pair.right.text, state);
       if (!marked) return pair;
 
       return {
@@ -115,7 +117,7 @@ export function Diff() {
         right: { ...pair.right, segments: marked.right },
       };
     });
-  }, [visible]);
+  }, [visible, state.ignoreCase, state.ignoreWhitespace, state.normaliseEol, state.trimTrailing]);
 
   const unified = useMemo(() => toUnified(result.rows), [result.rows]);
 

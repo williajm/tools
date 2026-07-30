@@ -267,10 +267,16 @@ const MAX_INLINE_LENGTH = 600;
 export function wordSegments(
   left: string,
   right: string,
+  options: Options = DEFAULT_OPTIONS,
 ): { left: Segment[]; right: Segment[] } | null {
   if (left.length > MAX_INLINE_LENGTH || right.length > MAX_INLINE_LENGTH) return null;
 
-  const changes = diffWords(left, right);
+  // Matches the options the line diff ran under, so the words marked agree with
+  // the lines called changed — without it, `ignoreCase` produced a pair of lines
+  // reported as equal whose every word was highlighted as different. There is no
+  // `ignoreWhitespace` to pass on: `diffWords` treats runs of whitespace as
+  // insignificant already, which is what separates it from `diffWordsWithSpace`.
+  const changes = diffWords(left, right, { ignoreCase: options.ignoreCase });
 
   const shared = changes
     .filter((change) => !change.added && !change.removed)
@@ -288,12 +294,58 @@ export function wordSegments(
   };
 }
 
-/** Unified diff text, for pasting into a patch or a review comment. */
-export function toUnified(rows: Row[], leftName = 'left', rightName = 'right'): string {
-  const lines = [`--- ${leftName}`, `+++ ${rightName}`];
-  for (const row of rows) {
-    const prefix = row.kind === 'added' ? '+' : row.kind === 'removed' ? '-' : ' ';
-    lines.push(prefix + row.text);
+/**
+ * Unified diff text, for pasting into a patch or a review comment.
+ *
+ * Emitted as real hunks with `@@` headers and `context` lines either side. The
+ * headers are what make this a patch rather than a listing: `git apply` and
+ * `patch` both need them to locate the change, and reject the input outright
+ * without them. Runs of unchanged lines between hunks are dropped, which is also
+ * what makes the output a reasonable size on a large file.
+ */
+export function toUnified(
+  rows: Row[],
+  leftName = 'left',
+  rightName = 'right',
+  context = 3,
+): string {
+  const header = [`--- ${leftName}`, `+++ ${rightName}`];
+
+  const changed = rows.reduce<number[]>((out, row, i) => {
+    if (row.kind !== 'equal') out.push(i);
+    return out;
+  }, []);
+  // No differences means no hunks. The file headers alone are a valid empty patch.
+  if (changed.length === 0) return header.join('\n');
+
+  // Group changes into hunks, merging any two whose context windows touch.
+  const hunks: Array<{ start: number; end: number }> = [];
+  for (const i of changed) {
+    const start = Math.max(0, i - context);
+    const end = Math.min(rows.length - 1, i + context);
+    const last = hunks[hunks.length - 1];
+    if (last && start <= last.end + 1) last.end = Math.max(last.end, end);
+    else hunks.push({ start, end });
   }
-  return lines.join('\n');
+
+  const lines = [...header];
+  for (const hunk of hunks) {
+    const slice = rows.slice(hunk.start, hunk.end + 1);
+    const fromLeft = slice.filter((r) => r.kind !== 'added');
+    const fromRight = slice.filter((r) => r.kind !== 'removed');
+
+    // A hunk that adds to an empty side starts at line 0 with a count of 0,
+    // which is how unified diff spells "there was nothing here".
+    const leftStart = fromLeft[0]?.leftNo ?? 0;
+    const rightStart = fromRight[0]?.rightNo ?? 0;
+
+    lines.push(`@@ -${leftStart},${fromLeft.length} +${rightStart},${fromRight.length} @@`);
+    for (const row of slice) {
+      const prefix = row.kind === 'added' ? '+' : row.kind === 'removed' ? '-' : ' ';
+      lines.push(prefix + row.text);
+    }
+  }
+
+  // Patches are newline-terminated; `git apply` warns about one that is not.
+  return `${lines.join('\n')}\n`;
 }

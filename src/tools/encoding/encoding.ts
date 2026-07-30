@@ -49,6 +49,21 @@ export function toBase64(text: string): string {
   return btoa(bytesToBinary(encoder.encode(text)));
 }
 
+/**
+ * Base64 encodes three bytes as four characters, so a length that leaves one
+ * character over cannot have come from any input. `atob` throws on it, and that
+ * throw is indistinguishable from a genuine decode failure further down — which
+ * had "abc" reported as bytes that are not valid UTF-8 rather than as the wrong
+ * length.
+ */
+function checkBase64Length(cleaned: string, label: string): void {
+  if (cleaned.replace(/=+$/, '').length % 4 === 1) {
+    throw new EncodingError(
+      `Not valid ${label}: the length is wrong — one character is left over, so a character is missing or extra.`,
+    );
+  }
+}
+
 export function fromBase64(b64: string): string {
   // Tolerate whitespace from wrapped/pasted input.
   const cleaned = b64.replace(/\s+/g, '');
@@ -56,6 +71,7 @@ export function fromBase64(b64: string): string {
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(cleaned)) {
     throw new EncodingError('Not valid base64: contains characters outside the base64 alphabet.');
   }
+  checkBase64Length(cleaned, 'base64');
   return decoder.decode(binaryToBytes(atob(cleaned)));
 }
 
@@ -69,6 +85,10 @@ export function fromBase64Url(b64: string): string {
   if (!/^[A-Za-z0-9_-]*={0,2}$/.test(cleaned)) {
     throw new EncodingError('Not valid base64url: expected the URL-safe alphabet (- and _ instead of + and /).');
   }
+  // Checked here rather than left to fromBase64: padding a leftover character to
+  // a multiple of four needs three '=', which would trip the alphabet check
+  // instead and blame the wrong thing.
+  checkBase64Length(cleaned, 'base64url');
   const padded = cleaned.replace(/-/g, '+').replace(/_/g, '/');
   return fromBase64(padded + '='.repeat((4 - (padded.length % 4)) % 4));
 }
@@ -112,17 +132,33 @@ const NAMED_ENTITIES: Record<string, string> = {
   nbsp: ' ',
 };
 
+/** Largest Unicode code point. `String.fromCodePoint` throws RangeError beyond it. */
+const MAX_CODE_POINT = 0x10ffff;
+
+/**
+ * A numeric character reference naming a code point that does not exist is a
+ * broken entity, and saying so is the useful answer. Left to throw, the
+ * RangeError escaped as a TextDecoder failure and reported "decoded to bytes
+ * that are not valid UTF-8 text" — about input containing no bytes at all.
+ */
+function referenceToString(code: number, entity: string): string {
+  if (!Number.isInteger(code) || code < 0 || code > MAX_CODE_POINT) {
+    throw new EncodingError(
+      `“${entity}” is not a valid character reference: ${code} is outside the Unicode range of 0 to 0x10FFFF.`,
+    );
+  }
+  return String.fromCodePoint(code);
+}
+
 export function fromHtml(text: string): string {
   // Deliberately hand-rolled rather than assigning to innerHTML, which would
   // execute or fetch things depending on the markup pasted in.
   return text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, body: string) => {
     if (body.startsWith('#x') || body.startsWith('#X')) {
-      const code = Number.parseInt(body.slice(2), 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+      return referenceToString(Number.parseInt(body.slice(2), 16), match);
     }
     if (body.startsWith('#')) {
-      const code = Number.parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+      return referenceToString(Number.parseInt(body.slice(1), 10), match);
     }
     return NAMED_ENTITIES[body.toLowerCase()] ?? match;
   });

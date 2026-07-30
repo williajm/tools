@@ -35,6 +35,24 @@ const GENERATORS: Record<IdKind, () => string> = {
   nanoid: () => nanoid(),
 };
 
+/**
+ * Kinds whose case carries no meaning, so changing it is presentation only.
+ *
+ * UUID hex and ULID's Crockford base32 are both case-insensitive by definition.
+ * NanoID is not: its alphabet is `A-Za-z0-9_-`, where `a` and `A` are distinct
+ * characters. Upper-casing one produces a different identifier and folds 52
+ * letters into 26, so it is excluded for the same reason hyphens are only
+ * stripped from UUIDs — the operation would corrupt the value.
+ */
+export const CASE_INSENSITIVE: ReadonlySet<IdKind> = new Set<IdKind>([
+  'uuidv4',
+  'uuidv7',
+  'ulid',
+]);
+
+/** Kinds that contain hyphens as separators, so removing them is lossless. */
+export const HYPHENATED: ReadonlySet<IdKind> = new Set<IdKind>(['uuidv4', 'uuidv7']);
+
 export interface Options {
   uppercase?: boolean;
   hyphens?: boolean;
@@ -47,9 +65,10 @@ export function generate(kind: IdKind, count: number, options: Options = {}): st
   const out: string[] = [];
   for (let i = 0; i < safeCount; i++) {
     let id = GENERATORS[kind]();
-    // Hyphens only exist in UUIDs; stripping them elsewhere would corrupt the value.
-    if (!hyphens && (kind === 'uuidv4' || kind === 'uuidv7')) id = id.replace(/-/g, '');
-    if (uppercase) id = id.toUpperCase();
+    // Both of these would corrupt the value on a kind that does not permit them,
+    // so neither is applied on the strength of the flag alone.
+    if (!hyphens && HYPHENATED.has(kind)) id = id.replace(/-/g, '');
+    if (uppercase && CASE_INSENSITIVE.has(kind)) id = id.toUpperCase();
     out.push(id);
   }
   return out;

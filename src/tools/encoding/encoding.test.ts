@@ -120,6 +120,55 @@ describe('html', () => {
   it('leaves unknown entities untouched rather than guessing', () => {
     expect(fromHtml('&notarealentity;')).toBe('&notarealentity;');
   });
+
+  /**
+   * Regression: an out-of-range code point threw RangeError out of
+   * String.fromCodePoint, which the dispatcher then misreported as bytes that
+   * are not valid UTF-8 — an explanation about bytes, for input with none.
+   */
+  it('explains a character reference outside the Unicode range', () => {
+    for (const entity of ['&#x110000;', '&#1114112;', '&#99999999999999999999;', '&#xFFFFFFF;']) {
+      const result = convert(entity, 'html', 'decode');
+      expect(result.error, entity).toMatch(/outside the Unicode range/);
+      expect(result.error, entity).not.toMatch(/UTF-8/);
+    }
+  });
+
+  it('still decodes the highest valid code point', () => {
+    expect(fromHtml('&#x10FFFF;')).toBe(String.fromCodePoint(0x10ffff));
+  });
+});
+
+describe('base64 length', () => {
+  /**
+   * Regression: `atob` throws on a length that leaves one character over, and
+   * that throw was reported as invalid UTF-8 rather than as a wrong length.
+   */
+  it('explains a leftover character rather than blaming the bytes', () => {
+    for (const bad of ['a', 'YWJjZ']) {
+      const result = convert(bad, 'base64', 'decode');
+      expect(result.error, bad).toMatch(/length is wrong/);
+      expect(result.error, bad).not.toMatch(/UTF-8/);
+    }
+  });
+
+  it('explains it for base64url too', () => {
+    const result = convert('a', 'base64url', 'decode');
+    expect(result.error).toMatch(/length is wrong/);
+    expect(result.error).toMatch(/base64url/);
+  });
+
+  it('still accepts valid unpadded lengths', () => {
+    expect(convert('YQ', 'base64', 'decode')).toEqual({ output: 'a' });
+    expect(convert('YWI', 'base64', 'decode')).toEqual({ output: 'ab' });
+    expect(convert('YWJj', 'base64', 'decode')).toEqual({ output: 'abc' });
+  });
+
+  it('still reports genuinely invalid UTF-8 as such', () => {
+    // Correct length and alphabet, but the bytes are not text.
+    const result = convert('abc', 'base64', 'decode');
+    expect(result.error).toMatch(/UTF-8/);
+  });
 });
 
 describe('empty input', () => {

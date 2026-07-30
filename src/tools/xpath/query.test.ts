@@ -155,6 +155,54 @@ describe('cssPathOf', () => {
       expect(doc!.querySelector(path), path).toBe(el);
     }
   });
+
+  /**
+   * Regression: an id was used as a shortcut without checking it identified
+   * anything. Duplicate ids are invalid HTML and common in pasted markup — which
+   * is the markup being debugged — and `#dup` resolves to the first match, so the
+   * locator handed back pointed at a different element than the one selected.
+   */
+  describe('duplicate ids', () => {
+    const DUPES = `<!doctype html><html><body>
+      <div id="wrap"><span id="dup">first</span></div>
+      <div id="other"><span id="dup">second</span></div>
+    </body></html>`;
+
+    it('does not shortcut to a duplicated id', () => {
+      const { doc } = parseDocument(DUPES, 'html');
+      const second = doc!.querySelectorAll('#dup')[1]!;
+      expect(second.textContent).toBe('second');
+      const path = cssPathOf(second);
+      expect(path).not.toBe('#dup');
+      expect(doc!.querySelector(path)).toBe(second);
+    });
+
+    it('does not anchor on a duplicated ancestor id either', () => {
+      const { doc } = parseDocument(
+        `<!doctype html><html><body>
+           <div id="dup"><p>one</p></div>
+           <div id="dup"><p><b>two</b></p></div>
+         </body></html>`,
+        'html',
+      );
+      const target = doc!.querySelectorAll('b')[0]!;
+      const path = cssPathOf(target);
+      expect(doc!.querySelector(path)).toBe(target);
+    });
+
+    it('still uses an id that is genuinely unique in the same document', () => {
+      const { doc } = parseDocument(DUPES, 'html');
+      expect(cssPathOf(doc!.querySelector('#other')!)).toBe('#other');
+    });
+
+    it('round-trips every element even with duplicates present', () => {
+      const { doc } = parseDocument(DUPES, 'html');
+      for (const el of doc!.querySelectorAll('*')) {
+        const path = cssPathOf(el);
+        expect(doc!.querySelector(path), path).toBe(el);
+      }
+    });
+  });
 });
 
 describe('xpathOf', () => {

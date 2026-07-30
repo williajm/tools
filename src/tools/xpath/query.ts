@@ -74,16 +74,55 @@ function escapeIdent(value: string): string {
   return value.replace(/[^\w-]/g, (c) => `\\${c}`);
 }
 
-/** Builds a stable CSS path, preferring an id when one is present. */
+/**
+ * Ids that appear more than once in a document, computed once per parse.
+ *
+ * Keyed on the document, which `parseDocument` builds fresh for every query, so
+ * an entry can never outlive the markup it describes.
+ */
+const duplicateIds = new WeakMap<Document, ReadonlySet<string>>();
+
+function duplicatedIdsOf(doc: Document): ReadonlySet<string> {
+  const cached = duplicateIds.get(doc);
+  if (cached) return cached;
+
+  const seen = new Set<string>();
+  const duplicated = new Set<string>();
+  for (const element of doc.querySelectorAll('[id]')) {
+    if (seen.has(element.id)) duplicated.add(element.id);
+    else seen.add(element.id);
+  }
+  duplicateIds.set(doc, duplicated);
+  return duplicated;
+}
+
+/**
+ * The element's id, but only when it actually identifies this element.
+ *
+ * Duplicate ids are invalid HTML and common in the markup someone pastes into a
+ * selector tester — which is the markup being debugged. `#dup` resolves to the
+ * first match, so shortcutting to it would hand back a locator pointing at a
+ * different element. A longer path that is correct beats a short one that lies.
+ */
+function usableId(element: Element): string | null {
+  if (!element.id) return null;
+  const doc = element.ownerDocument;
+  if (!doc) return null;
+  return duplicatedIdsOf(doc).has(element.id) ? null : element.id;
+}
+
+/** Builds a stable CSS path, preferring a uniquely identifying id when there is one. */
 export function cssPathOf(element: Element): string {
-  if (element.id) return `#${escapeIdent(element.id)}`;
+  const own = usableId(element);
+  if (own) return `#${escapeIdent(own)}`;
 
   const parts: string[] = [];
   let current: Element | null = element;
 
   while (current && current.nodeType === 1) {
-    if (current.id) {
-      parts.unshift(`#${escapeIdent(current.id)}`);
+    const anchor = usableId(current);
+    if (anchor) {
+      parts.unshift(`#${escapeIdent(anchor)}`);
       break;
     }
 

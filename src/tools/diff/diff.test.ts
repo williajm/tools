@@ -306,4 +306,51 @@ describe('toUnified', () => {
     expect(lines).toContain('-b');
     expect(lines).toContain('+c');
   });
+
+  /**
+   * Regression: the output had no `@@` headers at all, so despite being offered
+   * as a patch it was rejected by `git apply` and `patch` as corrupt.
+   */
+  it('emits a hunk header locating the change', () => {
+    const { rows } = computeDiff('a\nb', 'a\nc', 'lines', opts());
+    const lines = toUnified(rows).split('\n');
+    expect(lines[2]).toBe('@@ -1,2 +1,2 @@');
+  });
+
+  it('counts each side of the hunk correctly', () => {
+    // One line appended: left has 2 lines, right has 3.
+    const { rows } = computeDiff('a\nb\n', 'a\nb\nc\n', 'lines', opts());
+    expect(toUnified(rows)).toContain('@@ -1,2 +1,3 @@');
+  });
+
+  it('spells an addition to an empty side as starting at zero', () => {
+    const { rows } = computeDiff('', 'new line\n', 'lines', opts());
+    expect(toUnified(rows)).toMatch(/@@ -\d+,\d+ \+1,1 @@/);
+  });
+
+  it('splits distant changes into separate hunks and drops the middle', () => {
+    const left = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n');
+    const right = left.replace('line 0', 'CHANGED 0').replace('line 39', 'CHANGED 39');
+    const unified = toUnified(computeDiff(left, right, 'lines', opts()).rows);
+    expect(unified.match(/^@@ /gm)).toHaveLength(2);
+    // The untouched middle is not carried along.
+    expect(unified).not.toContain('line 20');
+  });
+
+  it('merges changes whose context windows touch into one hunk', () => {
+    const left = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n');
+    const right = left.replace('line 4', 'CHANGED 4').replace('line 6', 'CHANGED 6');
+    const unified = toUnified(computeDiff(left, right, 'lines', opts()).rows);
+    expect(unified.match(/^@@ /gm)).toHaveLength(1);
+  });
+
+  it('emits headers but no hunks for identical input', () => {
+    const { rows } = computeDiff('same\n', 'same\n', 'lines', opts());
+    expect(toUnified(rows)).toBe('--- left\n+++ right');
+  });
+
+  it('is newline-terminated', () => {
+    const { rows } = computeDiff('a\n', 'b\n', 'lines', opts());
+    expect(toUnified(rows).endsWith('\n')).toBe(true);
+  });
 });

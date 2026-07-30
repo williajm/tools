@@ -2,7 +2,16 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 import { ToolShell } from '@shared/components/ToolShell.tsx';
 import { CopyButton } from '@shared/components/CopyButton.tsx';
 import { Segmented } from '@shared/components/Segmented.tsx';
-import { KINDS, KIND_NAMES, KIND_NOTES, generate, timestampOf, type IdKind } from './ids.ts';
+import {
+  CASE_INSENSITIVE,
+  HYPHENATED,
+  KINDS,
+  KIND_NAMES,
+  KIND_NOTES,
+  generate,
+  timestampOf,
+  type IdKind,
+} from './ids.ts';
 
 export function Uuid() {
   const [kind, setKind] = useState<IdKind>('uuidv4');
@@ -18,7 +27,8 @@ export function Uuid() {
   // Generate on load and whenever the options change, so the page is never empty.
   useEffect(regenerate, [regenerate]);
 
-  const isUuid = kind === 'uuidv4' || kind === 'uuidv7';
+  const canUppercase = CASE_INSENSITIVE.has(kind);
+  const canDropHyphens = HYPHENATED.has(kind);
   const firstStamp = ids.length ? timestampOf(kind, ids[0]!) : null;
 
   return (
@@ -48,20 +58,28 @@ export function Uuid() {
             />
           </label>
 
-          <label class="checkbox">
+          <label
+            class="checkbox"
+            title={
+              canUppercase
+                ? undefined
+                : 'NanoID is case-sensitive — changing case would produce a different ID'
+            }
+          >
             <input
               type="checkbox"
-              checked={uppercase}
+              checked={uppercase && canUppercase}
+              disabled={!canUppercase}
               onChange={(e) => setUppercase((e.target as HTMLInputElement).checked)}
             />
             Uppercase
           </label>
 
-          <label class="checkbox" title={isUuid ? undefined : 'Only UUIDs contain hyphens'}>
+          <label class="checkbox" title={canDropHyphens ? undefined : 'Only UUIDs contain hyphens'}>
             <input
               type="checkbox"
               checked={hyphens}
-              disabled={!isUuid}
+              disabled={!canDropHyphens}
               onChange={(e) => setHyphens((e.target as HTMLInputElement).checked)}
             />
             Hyphens
