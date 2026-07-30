@@ -29,6 +29,53 @@ export interface MatchInfo {
 /** Guard against a pattern that matches empty repeatedly, which would spin forever. */
 const MAX_MATCHES = 1000;
 
+/**
+ * Maps each capture group's index to its name, by walking the pattern.
+ *
+ * A group's index is its position among the capturing parens, and that is the
+ * only thing that defines it. This used to be recovered per match by looking up
+ * each named group's captured text in the match array, which got it wrong
+ * whenever two groups captured the same string — `/(?<a>\w+)-(?<b>\w+)/` on
+ * "ab-ab" labelled only the first — and lost the name entirely for an optional
+ * group that did not participate.
+ */
+export function groupNames(source: string): Map<number, string> {
+  const names = new Map<number, string>();
+  let index = 0;
+  let inClass = false;
+
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    // An escape consumes the next character, so neither can open anything.
+    if (ch === '\\') {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (ch === ']') inClass = false;
+      continue;
+    }
+    if (ch === '[') {
+      inClass = true;
+      continue;
+    }
+    if (ch !== '(') continue;
+
+    if (source[i + 1] !== '?') {
+      index++;
+      continue;
+    }
+    // `(?<name>` captures. `(?:`, `(?=`, `(?!`, `(?<=` and `(?<!` do not.
+    const named = /^\(\?<([^=!][^>]*)>/.exec(source.slice(i));
+    if (named) {
+      index++;
+      names.set(index, named[1]!);
+    }
+  }
+
+  return names;
+}
+
 export function findMatches(regex: RegExp, input: string): MatchInfo[] {
   const matches: MatchInfo[] = [];
   if (!input) return matches;
@@ -36,17 +83,11 @@ export function findMatches(regex: RegExp, input: string): MatchInfo[] {
   // A global regex is stateful; work on a fresh copy so repeated renders agree.
   const global = regex.global || regex.sticky;
   const re = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : `${regex.flags}g`);
+  // Depends only on the pattern, so it is resolved once rather than per match.
+  const nameByIndex = groupNames(regex.source);
 
   let match: RegExpExecArray | null;
   while ((match = re.exec(input)) !== null) {
-    const named = match.groups ?? {};
-    const nameByIndex = new Map<number, string>();
-    // Map named groups back to their positional index for display.
-    for (const name of Object.keys(named)) {
-      const idx = match.indexOf(named[name] as string, 1);
-      if (idx > 0 && !nameByIndex.has(idx)) nameByIndex.set(idx, name);
-    }
-
     matches.push({
       index: match.index,
       text: match[0],
@@ -155,6 +196,57 @@ export function applyReplace(regex: RegExp, input: string, replacement: string):
   } catch (err) {
     return err instanceof Error ? `Error: ${err.message}` : String(err);
   }
+}
+
+// --- one-shot evaluation -----------------------------------------------------
+
+export interface EvaluateRequest {
+  pattern: string;
+  flags: string;
+  input: string;
+  tests: string;
+  replacement: string;
+}
+
+export interface Evaluation {
+  /** Set when the pattern does not compile; the rest is then empty. */
+  error?: string;
+  matches: MatchInfo[];
+  segments: Segment[];
+  outcomes: TestOutcome[];
+  summary: Summary;
+  replaced: string;
+}
+
+export const EMPTY_EVALUATION: Evaluation = {
+  matches: [],
+  segments: [],
+  outcomes: [],
+  summary: { total: 0, passed: 0, failed: 0 },
+  replaced: '',
+};
+
+/**
+ * Everything the tool displays for one pattern, in a single call.
+ *
+ * Gathered into one function of plain data in and plain data out so it can run
+ * on a worker thread: a pattern like `(a+)+$` against a non-matching string
+ * backtracks for longer than anyone will wait, and a regex cannot be interrupted
+ * once started. Off the main thread the worker can simply be terminated, which
+ * is the only way to put a time limit on this.
+ */
+export function evaluate(request: EvaluateRequest): Evaluation {
+  const { regex, error } = compile(request.pattern, request.flags);
+  if (!regex) return error ? { ...EMPTY_EVALUATION, error } : EMPTY_EVALUATION;
+
+  const outcomes = runTests(regex, parseTestCases(request.tests));
+  return {
+    matches: findMatches(regex, request.input),
+    segments: segment(regex, request.input),
+    outcomes,
+    summary: summarise(outcomes),
+    replaced: applyReplace(regex, request.input, request.replacement),
+  };
 }
 
 export const FLAGS: ReadonlyArray<{ flag: string; label: string; note: string }> = [

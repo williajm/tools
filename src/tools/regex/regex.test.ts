@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   applyReplace,
   compile,
+  evaluate,
   findMatches,
+  groupNames,
   parseTestCases,
   runTests,
   segment,
@@ -181,5 +183,91 @@ describe('applyReplace', () => {
 
   it('supports named group references', () => {
     expect(applyReplace(/(?<a>\w)(?<b>\w)/g, 'xy', '$<b>$<a>')).toBe('yx');
+  });
+});
+
+describe('groupNames', () => {
+  it('maps named groups to their capture index', () => {
+    expect(groupNames('(?<a>x)(?<b>y)')).toEqual(new Map([[1, 'a'], [2, 'b']]));
+  });
+
+  it('counts unnamed groups towards the index', () => {
+    expect(groupNames('(x)(?<b>y)(z)')).toEqual(new Map([[2, 'b']]));
+  });
+
+  it('ignores non-capturing groups and assertions', () => {
+    expect(groupNames('(?:a)(?=b)(?!c)(?<=d)(?<!e)(?<f>g)')).toEqual(new Map([[1, 'f']]));
+  });
+
+  it('ignores parens inside a character class', () => {
+    expect(groupNames('[()](?<a>x)')).toEqual(new Map([[1, 'a']]));
+  });
+
+  it('ignores escaped parens', () => {
+    expect(groupNames('\\((?<a>x)\\)')).toEqual(new Map([[1, 'a']]));
+  });
+
+  it('ignores an escaped bracket that does not open a class', () => {
+    expect(groupNames('\\[(?<a>x)')).toEqual(new Map([[1, 'a']]));
+  });
+
+  it('returns nothing for a pattern without named groups', () => {
+    expect(groupNames('(a)(b)')).toEqual(new Map());
+  });
+});
+
+/**
+ * Regression: names were recovered per match by looking up each named group's
+ * captured text in the match array. Two groups capturing the same string
+ * collided, and a group that did not participate lost its name entirely.
+ */
+describe('named group labelling', () => {
+  it('labels both groups when they capture identical text', () => {
+    const [match] = findMatches(/(?<first>\w+)-(?<second>\w+)/, 'ab-ab');
+    expect(match!.groups.map((g) => g.name)).toEqual(['first', 'second']);
+    expect(match!.groups.map((g) => g.value)).toEqual(['ab', 'ab']);
+  });
+
+  it('keeps the name of an optional group that did not match', () => {
+    const [match] = findMatches(/(?<maybe>x)?(?<always>y)/, 'y');
+    expect(match!.groups.map((g) => g.name)).toEqual(['maybe', 'always']);
+    expect(match!.groups[0]!.value).toBeUndefined();
+  });
+
+  it('leaves unnamed groups unnamed without shifting the named ones', () => {
+    const [match] = findMatches(/(\d)(?<letter>[a-z])(\d)/, '1a2');
+    expect(match!.groups.map((g) => g.name)).toEqual([null, 'letter', null]);
+  });
+});
+
+describe('evaluate', () => {
+  const base = { pattern: '\\d+', flags: 'g', input: 'a1b22', tests: '1\n!x', replacement: '#' };
+
+  it('returns everything the tool displays in one call', () => {
+    const result = evaluate(base);
+    expect(result.error).toBeUndefined();
+    expect(result.matches.map((m) => m.text)).toEqual(['1', '22']);
+    expect(result.replaced).toBe('a#b#');
+    expect(result.summary).toEqual({ total: 2, passed: 2, failed: 0 });
+    expect(result.segments.some((s) => s.matched)).toBe(true);
+  });
+
+  it('reports a compile failure and nothing else', () => {
+    const result = evaluate({ ...base, pattern: '([unclosed' });
+    expect(result.error).toBeTruthy();
+    expect(result.matches).toEqual([]);
+    expect(result.outcomes).toEqual([]);
+    expect(result.replaced).toBe('');
+  });
+
+  it('treats an empty pattern as nothing to do', () => {
+    const result = evaluate({ ...base, pattern: '' });
+    expect(result.error).toBeUndefined();
+    expect(result.matches).toEqual([]);
+  });
+
+  it('produces only structured-cloneable data, so it can cross a worker boundary', () => {
+    // Throws on a function, class instance or anything else non-transferable.
+    expect(() => structuredClone(evaluate(base))).not.toThrow();
   });
 });

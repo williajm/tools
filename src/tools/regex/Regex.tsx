@@ -2,16 +2,8 @@ import { useMemo } from 'preact/hooks';
 import { ToolShell } from '@shared/components/ToolShell.tsx';
 import { CopyButton } from '@shared/components/CopyButton.tsx';
 import { useHashState } from '@shared/hooks/useHashState.ts';
-import {
-  FLAGS,
-  applyReplace,
-  compile,
-  findMatches,
-  parseTestCases,
-  runTests,
-  segment,
-  summarise,
-} from './regex.ts';
+import { FLAGS } from './regex.ts';
+import { useEvaluation } from './useEvaluation.ts';
 
 interface State {
   pattern: string;
@@ -39,22 +31,23 @@ export function Regex() {
   const [state, setState] = useHashState<State>(INITIAL);
   const set = <K extends keyof State>(key: K, value: State[K]) => setState({ ...state, [key]: value });
 
-  const compiled = useMemo(() => compile(state.pattern, state.flags), [state.pattern, state.flags]);
-  const regex = compiled.regex;
-
-  const matches = useMemo(() => (regex ? findMatches(regex, state.input) : []), [regex, state.input]);
-  const segments = useMemo(() => (regex ? segment(regex, state.input) : []), [regex, state.input]);
-
-  const outcomes = useMemo(
-    () => (regex ? runTests(regex, parseTestCases(state.tests)) : []),
-    [regex, state.tests],
+  // Evaluated on a worker so a pattern that backtracks forever can be abandoned
+  // rather than freezing the tab. Memoised so an unchanged request is not re-sent
+  // on every render.
+  const request = useMemo(
+    () => ({
+      pattern: state.pattern,
+      flags: state.flags,
+      input: state.input,
+      tests: state.tests,
+      replacement: state.replacement,
+    }),
+    [state.pattern, state.flags, state.input, state.tests, state.replacement],
   );
-  const summary = summarise(outcomes);
 
-  const replaced = useMemo(
-    () => (regex ? applyReplace(regex, state.input, state.replacement) : ''),
-    [regex, state.input, state.replacement],
-  );
+  const { evaluation, status } = useEvaluation(request);
+  const { matches, segments, outcomes, summary, replaced } = evaluation;
+  const timedOut = status === 'timeout';
 
   const toggleFlag = (flag: string) => {
     set('flags', state.flags.includes(flag) ? state.flags.replace(flag, '') : state.flags + flag);
@@ -90,7 +83,16 @@ export function Regex() {
           ))}
         </div>
 
-        {compiled.error && <div class="note note--error mono small">{compiled.error}</div>}
+        {evaluation.error && <div class="note note--error mono small">{evaluation.error}</div>}
+
+        {timedOut && (
+          <div class="note note--error">
+            <strong>Gave up after 2 seconds.</strong> This pattern backtracks
+            catastrophically on this input — a construct like <span class="mono">(a+)+</span> can
+            take exponential time on a string that nearly matches. It was run on a worker thread and
+            stopped, so the page stayed responsive. Simplify the pattern or shorten the input.
+          </div>
+        )}
 
         <div class="grid-2">
           <div class="stack">
