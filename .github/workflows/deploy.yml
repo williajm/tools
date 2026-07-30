@@ -46,6 +46,21 @@ jobs:
         env:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
 
+      # The end-to-end suite is the only layer that sees the CSP, since it drives
+      # the built site in a real browser. Unit tests run in Node, which has no CSP
+      # at all — that is exactly how a validator relying on `new Function` shipped
+      # completely broken once. Skipping this here would let the same class of
+      # regression reach production even while CI went red beside it.
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+        env:
+          # Serve the build produced above rather than building a third time.
+          PLAYWRIGHT_SKIP_BUILD: '1'
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: dist

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { TOOLS } from '../../src/shared/registry.ts';
 
 /**
  * State lives in the URL fragment, which browsers never send to a server. These
@@ -46,4 +47,39 @@ test('the input never leaves the browser', async ({ page }) => {
 
   // Requests carry the path but never the fragment, and nothing new is fetched.
   for (const url of requests) expect(url).not.toContain(secret);
+});
+
+/**
+ * A fragment is untrusted input. It survives truncation by chat clients, hand
+ * editing, and being shared from an older version of a tool. It used to be cast
+ * straight to the state type, so a valid-but-empty `{}` left required fields
+ * undefined and ten of the thirteen tools rendered a blank page.
+ */
+test('a damaged share link degrades to defaults instead of blanking the tool', async ({ page }) => {
+  const frag = (value: unknown) =>
+    Buffer.from(encodeURIComponent(JSON.stringify(value))).toString('base64').replace(/=+$/, '');
+
+  const hostile: Array<[string, string]> = [
+    ['an empty object', frag({})],
+    ['null', frag(null)],
+    ['an array', frag([1, 2])],
+    ['every field the wrong type', frag({ text: 1, left: [], input: null, parameters: 7, pattern: {} })],
+    ['not base64 at all', 'not!valid!base64'],
+    ['a truncated fragment', frag({ text: 'hello' }).slice(0, 4)],
+  ];
+
+  for (const tool of TOOLS) {
+    for (const [label, value] of hostile) {
+      const problems: string[] = [];
+      const onError = (error: Error) => problems.push(error.message);
+      page.on('pageerror', onError);
+
+      await page.goto(`./${tool.slug}/#${value}`);
+      // The footer only renders once the tool has mounted without throwing.
+      await expect(page.locator('footer.foot'), `${tool.slug} given ${label}`).toBeVisible();
+      expect(problems, `${tool.slug} given ${label}`).toEqual([]);
+
+      page.off('pageerror', onError);
+    }
+  }
 });

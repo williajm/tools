@@ -8,7 +8,20 @@ import { defineConfig, devices } from '@playwright/test';
  */
 
 const PORT = 4173;
-const BASE = process.env.BASE_PATH ?? '/tools/';
+
+/**
+ * Normalised the same way `vite.config.ts` does it, and for the same reason:
+ * `actions/configure-pages` reports a bare `/tools` for a project page and an
+ * empty string for a custom domain, while the served base always has both
+ * slashes. Reading the variable raw meant the deploy workflow polled `/tools`
+ * and never found the server.
+ */
+function basePath(): string {
+  const trimmed = (process.env.BASE_PATH ?? '/tools/').trim().replace(/^\/*/, '/').replace(/\/+$/, '');
+  return trimmed === '' ? '/' : `${trimmed}/`;
+}
+
+const BASE = basePath();
 // Bind and poll the same literal address. `vite preview` otherwise listens on
 // `localhost`, which resolves to ::1 first on the GitHub runners while this
 // check polls 127.0.0.1 — the server comes up and is never found.

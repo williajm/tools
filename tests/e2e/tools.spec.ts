@@ -140,3 +140,43 @@ test('the pairwise matrix verifies at the strength selected', async ({ page }) =
   await expect(page.getByText(/reachable 3-tuples/)).toBeVisible();
   await expect(page.getByText(/Uncovered/)).toBeHidden();
 });
+
+/**
+ * These two only fail in a browser. jsdom's XPath is case-insensitive and accepts
+ * a null namespace resolver, so the unit tests cannot see either defect — the
+ * generated XML locators matched nothing, and a prefixed expression threw
+ * NamespaceError.
+ */
+test('XML locators keep element case, so they select what was found', async ({ page }) => {
+  await page.goto('./xpath/');
+  await page.getByRole('button', { name: 'XML' }).click();
+  await page.getByRole('textbox', { name: 'Document' }).fill('<Root><Item/><Item/></Root>');
+  await page.getByLabel('XPath expression').fill('//Item');
+  await expect(page.locator('table.data tbody tr')).toHaveCount(2);
+
+  // The CSS path keeps the document's case; the lower-cased form matched nothing.
+  await expect(page.locator('table.data')).toContainText('Root > Item');
+  await expect(page.locator('table.data')).not.toContainText('root > item');
+
+  await page.getByLabel('Copy as').selectOption('playwright-xpath');
+  await expect(page.locator('table.data')).toContainText('/Root/Item');
+  await expect(page.locator('table.data')).not.toContainText('/root/item');
+
+  // The generated path, fed back in, finds exactly the node it came from.
+  await page.getByLabel('XPath expression').fill('/Root/Item[2]');
+  await expect(page.locator('table.data tbody tr')).toHaveCount(1);
+});
+
+test('a namespaced XML document can be queried by prefix', async ({ page }) => {
+  const problems: string[] = [];
+  page.on('pageerror', (error) => problems.push(error.message));
+
+  await page.goto('./xpath/');
+  await page.getByRole('button', { name: 'XML' }).click();
+  await page.getByRole('textbox', { name: 'Document' }).fill('<r xmlns:x="urn:z"><x:Item>found</x:Item></r>');
+  await page.getByLabel('XPath expression').fill('//x:Item');
+
+  await expect(page.locator('table.data tbody tr')).toHaveCount(1);
+  await expect(page.locator('table.data')).toContainText('found');
+  expect(problems).toEqual([]);
+});
