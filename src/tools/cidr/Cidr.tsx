@@ -3,7 +3,7 @@ import { ToolShell } from '@shared/components/ToolShell.tsx';
 import { CopyButton } from '@shared/components/CopyButton.tsx';
 import { Segmented } from '@shared/components/Segmented.tsx';
 import { useHashState } from '@shared/hooks/useHashState.ts';
-import { compareSets, describe, formatCount, splitSubnets } from './cidr.ts';
+import { compareSets, describe, formatCount, ruler, splitSubnets, type Info } from './cidr.ts';
 
 type Mode = 'calculator' | 'sets';
 
@@ -26,6 +26,78 @@ const INITIAL: State = {
 
 /** Rows of a split table beyond which the page stops being useful. */
 const SPLIT_LIMIT = 256;
+
+/**
+ * The address with the prefix boundary drawn on it.
+ *
+ * A netmask is a statement about where an address stops naming a network and
+ * starts naming a host inside it. Every other row on this page is downstream of
+ * that one fact, so it leads.
+ */
+function PrefixRuler({ info }: { info: Info }) {
+  const { cells, groupSize, separator, bitsPerCell, boundary } = ruler(info);
+
+  // One flat run, so the boundary mark can sit between any two cells — including
+  // mid-octet, which is exactly where a /12 or a /26 becomes hard to picture.
+  const items = cells.flatMap((cell, index) => {
+    const parts = [];
+    if (index === boundary) {
+      parts.push(
+        <span class="ruler__mark" key={`mark-${index}`}>
+          /{info.prefix}
+        </span>,
+      );
+    }
+    parts.push(
+      <span class={`ruler__cell ruler__cell--${cell.part}`} key={index}>
+        {cell.label}
+      </span>,
+    );
+    // When the cut lands on a group break, the mark stands in for the
+    // separator — printing both reads as ". /24".
+    const separatorHere = (index + 1) % groupSize === 0 && index !== cells.length - 1;
+    if (separatorHere && boundary !== index + 1) {
+      parts.push(
+        <span class="ruler__sep" key={`sep-${index}`}>
+          {separator}
+        </span>,
+      );
+    }
+    return parts;
+  });
+
+  if (boundary === cells.length) {
+    items.push(
+      <span class="ruler__mark" key="mark-end">
+        /{info.prefix}
+      </span>,
+    );
+  }
+
+  return (
+    <div class="ruler">
+      <div
+        class="ruler__track"
+        role="img"
+        aria-label={`${info.network}: ${info.prefix} network bits followed by ${info.hostBits} host bits`}
+      >
+        {items}
+      </div>
+
+      <div class="ruler__legend">
+        <span class="ruler__key ruler__key--network">
+          network · {info.prefix} bit{info.prefix === 1 ? '' : 's'}
+        </span>
+        <span class="ruler__key ruler__key--host">
+          host · {info.hostBits} bit{info.hostBits === 1 ? '' : 's'}
+        </span>
+        <span class="dim small">
+          {bitsPerCell === 1 ? 'one cell per bit' : 'one cell per hex digit, four bits each'}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export function Cidr() {
   const [state, setState] = useHashState<State>(INITIAL);
@@ -113,6 +185,8 @@ export function Cidr() {
 
             {info && (
               <>
+                <PrefixRuler info={info} />
+
                 <div class="row">
                   <span class="field__label">Details</span>
                   <span class="topbar__spacer" />

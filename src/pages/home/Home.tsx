@@ -3,6 +3,7 @@ import { CATEGORIES, TOOLS, searchTools, toolBySlug } from '@shared/registry.ts'
 import { toolUrl } from '@shared/lib/paths.ts';
 import { getRecents } from '@shared/lib/recents.ts';
 import { CommandPalette } from '@shared/components/CommandPalette.tsx';
+import { Wordmark } from '@shared/components/Wordmark.tsx';
 
 function ToolCard({ slug, name, blurb }: { slug: string; name: string; blurb: string }) {
   return (
@@ -26,7 +27,10 @@ export function Home() {
   return (
     <div class="shell">
       <header class="topbar">
-        <span class="topbar__home">tools</span>
+        <span class="topbar__home">
+          <Wordmark />
+          tools
+        </span>
         <span class="topbar__spacer" />
         <span class="topbar__hint">
           <kbd>Ctrl</kbd> <kbd>K</kbd>

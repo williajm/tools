@@ -11,8 +11,11 @@ import {
   isSkip,
   toSideBySide,
   toUnified,
+  wordSegments,
   type Granularity,
   type Options,
+  type Row,
+  type Segment,
 } from './diff.ts';
 
 type View = 'split' | 'unified';
@@ -39,6 +42,43 @@ const INITIAL: State = {
 /** Unchanged lines either side of a change when collapsing. */
 const CONTEXT = 3;
 
+/**
+ * A replaced line, with the words that actually changed marked.
+ *
+ * Two lines sitting opposite each other in red and green tell you *that*
+ * something changed; the point of a side-by-side view is seeing *what*, without
+ * reading both lines word by word.
+ */
+type MarkedRow = Row & { segments?: Segment[] };
+type MarkedPair = { skip: number } | { left?: MarkedRow; right?: MarkedRow };
+
+function LineCell({ row, side }: { row?: MarkedRow; side: 'left' | 'right' }) {
+  const marked = row?.segments;
+  const tint = side === 'left' ? 'diff__del' : 'diff__ins';
+  const kind = side === 'left' ? 'removed' : 'added';
+
+  if (!row) return <td />;
+  if (row.kind !== kind) return <td>{row.text}</td>;
+
+  return (
+    <td class={tint}>
+      {marked
+        ? marked.map((segment, i) =>
+            segment.changed ? (
+              // eslint-disable-next-line react/no-array-index-key
+              <mark key={i} class="diff__word">
+                {segment.text}
+              </mark>
+            ) : (
+              // eslint-disable-next-line react/no-array-index-key
+              <span key={i}>{segment.text}</span>
+            ),
+          )
+        : row.text}
+    </td>
+  );
+}
+
 export function Diff() {
   const [state, setState] = useHashState<State>(INITIAL);
   const set = <K extends keyof State>(key: K, value: State[K]) => setState({ ...state, [key]: value });
@@ -61,7 +101,21 @@ export function Diff() {
     [result.rows, state.collapsed],
   );
 
-  const pairs = useMemo(() => toSideBySide(visible), [visible]);
+  const pairs = useMemo((): MarkedPair[] => {
+    return toSideBySide(visible).map((pair) => {
+      if (isSkip(pair)) return pair;
+      // Only a removal sitting opposite an addition is an edit worth marking.
+      if (pair.left?.kind !== 'removed' || pair.right?.kind !== 'added') return pair;
+
+      const marked = wordSegments(pair.left.text, pair.right.text);
+      if (!marked) return pair;
+
+      return {
+        left: { ...pair.left, segments: marked.left },
+        right: { ...pair.right, segments: marked.right },
+      };
+    });
+  }, [visible]);
 
   const unified = useMemo(() => toUnified(result.rows), [result.rows]);
 
@@ -164,18 +218,22 @@ export function Diff() {
           )}
         </div>
 
-        <div class={result.summary.identical ? 'note note--ok' : 'note note--warn'}>
-          {result.summary.identical ? (
-            <>✓ No differences{state.ignoreCase || state.ignoreWhitespace ? ' under these options' : ''}.</>
-          ) : (
-            <>
-              <strong style="color:var(--ok)">+{result.summary.added}</strong>{' '}
-              <strong style="color:var(--danger)">−{result.summary.removed}</strong>{' '}
-              {lineMode ? 'lines' : state.granularity === 'words' ? 'words' : 'characters'},{' '}
-              {result.summary.unchanged} unchanged.
-            </>
-          )}
-        </div>
+        {result.summary.identical ? (
+          <div class="note note--ok">
+            ✓ No differences{state.ignoreCase || state.ignoreWhitespace ? ' under these options' : ''}.
+          </div>
+        ) : (
+          // A diff that found changes is the expected outcome, not a warning, so
+          // it reads as a tally rather than a coloured slab.
+          <div class="tally">
+            <span class="tally__add">+{result.summary.added}</span>
+            <span class="tally__del">−{result.summary.removed}</span>
+            <span class="tally__unit">
+              {lineMode ? 'lines' : state.granularity === 'words' ? 'words' : 'characters'} changed
+            </span>
+            <span class="tally__rest">{result.summary.unchanged} unchanged</span>
+          </div>
+        )}
 
         {lineMode ? (
           <div class="table-scroll">
@@ -198,13 +256,9 @@ export function Diff() {
                       // eslint-disable-next-line react/no-array-index-key
                       <tr key={i}>
                         <td class="diff__gutter">{pair.left?.leftNo ?? ''}</td>
-                        <td class={pair.left?.kind === 'removed' ? 'diff__del' : undefined}>
-                          {pair.left?.text ?? ''}
-                        </td>
+                        <LineCell row={pair.left} side="left" />
                         <td class="diff__gutter">{pair.right?.rightNo ?? ''}</td>
-                        <td class={pair.right?.kind === 'added' ? 'diff__ins' : undefined}>
-                          {pair.right?.text ?? ''}
-                        </td>
+                        <LineCell row={pair.right} side="right" />
                       </tr>
                     ),
                   )}

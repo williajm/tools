@@ -336,6 +336,69 @@ export function compareSets(aText: string, bText: string): SetResult {
   }
 }
 
+export interface RulerCell {
+  /** What to print in the cell: a bit for IPv4, a hex nibble for IPv6. */
+  label: string;
+  /** 'network' and 'host' are whole; 'split' straddles the prefix boundary. */
+  part: 'network' | 'host' | 'split';
+}
+
+export interface Ruler {
+  cells: RulerCell[];
+  /** Cells per visual group: an octet for IPv4, a hextet for IPv6. */
+  groupSize: number;
+  separator: string;
+  /** Bits each cell stands for — 1 for IPv4, 4 for IPv6. */
+  bitsPerCell: number;
+  /**
+   * Cell index the prefix boundary falls in front of, for marking the exact
+   * cut. Null when the boundary runs through a cell rather than between two —
+   * the split cell says that better than a line drawn through it would.
+   */
+  boundary: number | null;
+}
+
+/**
+ * The address laid out cell by cell, marking which part the prefix claims for
+ * the network. This is the thing a mask actually means, and the one view that a
+ * table of dotted-quad strings cannot give you.
+ *
+ * IPv4 is shown a bit at a time — all 32 fit, and reading the boundary off the
+ * binary is how a netmask is understood in the first place. IPv6 has 128 bits,
+ * far too many to read, so it is shown as its 32 hex nibbles; a prefix that
+ * lands mid-nibble marks that cell as split rather than pretending otherwise.
+ */
+export function ruler(info: Info): Ruler {
+  const start = parseCidr(info.cidr).start;
+
+  if (info.version === 4) {
+    const bits = start.toString(2).padStart(32, '0');
+    return {
+      cells: [...bits].map((label, index) => ({
+        label,
+        part: index < info.prefix ? 'network' : 'host',
+      })),
+      groupSize: 8,
+      separator: '.',
+      bitsPerCell: 1,
+      boundary: info.prefix,
+    };
+  }
+
+  const nibbles = start.toString(16).padStart(32, '0');
+  return {
+    cells: [...nibbles].map((label, index) => {
+      const first = index * 4;
+      const part = first + 4 <= info.prefix ? 'network' : first >= info.prefix ? 'host' : 'split';
+      return { label, part };
+    }),
+    groupSize: 4,
+    separator: ':',
+    bitsPerCell: 4,
+    boundary: info.prefix % 4 === 0 ? info.prefix / 4 : null,
+  };
+}
+
 /** Groups a count into digits a human can read: 4 294 967 296. */
 export function formatCount(n: bigint): string {
   return n.toLocaleString('en-GB').replace(/,/g, ' ');

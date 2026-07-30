@@ -8,6 +8,7 @@ import {
   normalise,
   toSideBySide,
   toUnified,
+  wordSegments,
   type Options,
   type Row,
 } from './diff.ts';
@@ -255,6 +256,42 @@ describe('toSideBySide', () => {
       expect(pair.left?.kind).not.toBe('added');
       expect(pair.right?.kind).not.toBe('removed');
     }
+  });
+});
+
+describe('wordSegments', () => {
+  it('marks only the words that changed', () => {
+    const result = wordSegments('jumps over the lazy dog', 'leaps over the lazy dog')!;
+    expect(result.left.filter((s) => s.changed).map((s) => s.text)).toEqual(['jumps']);
+    expect(result.right.filter((s) => s.changed).map((s) => s.text)).toEqual(['leaps']);
+  });
+
+  it('reassembles each side exactly', () => {
+    const left = 'Pack my box with five dozen jugs.';
+    const right = 'Pack my box with five dozen liquor jugs.';
+    const result = wordSegments(left, right)!;
+    expect(result.left.map((s) => s.text).join('')).toBe(left);
+    expect(result.right.map((s) => s.text).join('')).toBe(right);
+  });
+
+  it('declines when the lines share too little to be an edit', () => {
+    expect(wordSegments('the quick brown fox', 'entirely unrelated content here')).toBeNull();
+  });
+
+  it('declines on lines long enough to cost real time', () => {
+    const long = 'word '.repeat(200);
+    expect(wordSegments(long, `${long}extra`)).toBeNull();
+  });
+
+  it('handles an empty side without dividing by zero', () => {
+    expect(wordSegments('', '')).toBeNull();
+    expect(wordSegments('', 'added text')).toBeNull();
+  });
+
+  it('marks a trailing punctuation change', () => {
+    const result = wordSegments('can level six piqued gymnasts.', 'can level six piqued gymnasts!')!;
+    expect(result.left.some((s) => s.changed)).toBe(true);
+    expect(result.right.some((s) => s.changed)).toBe(true);
   });
 });
 

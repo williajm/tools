@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
 import { CommandPalette } from './CommandPalette.tsx';
+import { Wordmark } from './Wordmark.tsx';
 import { homeUrl } from '../lib/paths.ts';
 import { recordRecent } from '../lib/recents.ts';
 import { toolBySlug } from '../registry.ts';
@@ -27,6 +28,7 @@ export function ToolShell({ slug, wide, children }: Props) {
     <div class={wide ? 'shell shell--wide' : 'shell'}>
       <header class="topbar">
         <a class="topbar__home" href={homeUrl()}>
+          <Wordmark />
           tools
         </a>
         <span class="topbar__spacer" />

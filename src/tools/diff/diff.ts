@@ -242,6 +242,52 @@ export function toSideBySide(rows: readonly CollapsedRow[]): SidePair[] {
   return out;
 }
 
+export interface Segment {
+  text: string;
+  changed: boolean;
+}
+
+/**
+ * Below this share of shared content, a pair of lines is treated as a rewrite
+ * rather than an edit. Marking every word of an unrelated line is noise that
+ * makes the genuinely small edits harder to spot.
+ */
+const SIMILARITY_FLOOR = 0.3;
+
+/** Long lines make the word diff cost real time for no readability gain. */
+const MAX_INLINE_LENGTH = 600;
+
+/**
+ * Splits a replaced pair of lines into the words that survived and the words
+ * that changed, so a one-word edit reads as a one-word edit.
+ *
+ * Returns null when the two lines share too little to be an edit, or when they
+ * are too long to be worth the work — the caller then shows the plain line.
+ */
+export function wordSegments(
+  left: string,
+  right: string,
+): { left: Segment[]; right: Segment[] } | null {
+  if (left.length > MAX_INLINE_LENGTH || right.length > MAX_INLINE_LENGTH) return null;
+
+  const changes = diffWords(left, right);
+
+  const shared = changes
+    .filter((change) => !change.added && !change.removed)
+    .reduce((total, change) => total + change.value.trim().length, 0);
+  const longest = Math.max(left.trim().length, right.trim().length);
+  if (longest === 0 || shared / longest < SIMILARITY_FLOOR) return null;
+
+  return {
+    left: changes
+      .filter((change) => !change.added)
+      .map((change) => ({ text: change.value, changed: Boolean(change.removed) })),
+    right: changes
+      .filter((change) => !change.removed)
+      .map((change) => ({ text: change.value, changed: Boolean(change.added) })),
+  };
+}
+
 /** Unified diff text, for pasting into a patch or a review comment. */
 export function toUnified(rows: Row[], leftName = 'left', rightName = 'right'): string {
   const lines = [`--- ${leftName}`, `+++ ${rightName}`];

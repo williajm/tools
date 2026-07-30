@@ -6,6 +6,7 @@ import {
   describe,
   formatCount,
   parseList,
+  ruler,
   splitSubnets,
   type Info,
 } from './cidr.ts';
@@ -343,6 +344,61 @@ suite('compareSets', () => {
     expect(result.error).toBeUndefined();
     expect(result.mergedA).toEqual([]);
     expect(result.mergedB).toEqual([]);
+  });
+});
+
+suite('ruler', () => {
+  it('marks the network bits of an IPv4 block', () => {
+    const r = ruler(info('192.168.1.0/24'));
+    expect(r.cells).toHaveLength(32);
+    expect(r.bitsPerCell).toBe(1);
+    expect(r.cells.filter((c) => c.part === 'network')).toHaveLength(24);
+    expect(r.cells.filter((c) => c.part === 'host')).toHaveLength(8);
+    // 192 = 11000000, and the boundary never splits a bit.
+    expect(r.cells.slice(0, 8).map((c) => c.label).join('')).toBe('11000000');
+    expect(r.cells.some((c) => c.part === 'split')).toBe(false);
+  });
+
+  it('handles the extremes of the IPv4 space', () => {
+    expect(ruler(info('0.0.0.0/0')).cells.every((c) => c.part === 'host')).toBe(true);
+    expect(ruler(info('10.0.0.1/32')).cells.every((c) => c.part === 'network')).toBe(true);
+  });
+
+  it('shows IPv6 as nibbles, since 128 bits cannot be read', () => {
+    const r = ruler(info('2001:db8::/32'));
+    expect(r.cells).toHaveLength(32);
+    expect(r.bitsPerCell).toBe(4);
+    expect(r.cells.slice(0, 8).map((c) => c.label).join('')).toBe('20010db8');
+    expect(r.cells.filter((c) => c.part === 'network')).toHaveLength(8);
+  });
+
+  it('reports where the boundary falls between cells', () => {
+    expect(ruler(info('192.168.1.0/24')).boundary).toBe(24);
+    expect(ruler(info('10.0.0.0/0')).boundary).toBe(0);
+    expect(ruler(info('10.0.0.1/32')).boundary).toBe(32);
+    // Eight whole nibbles of network.
+    expect(ruler(info('2001:db8::/32')).boundary).toBe(8);
+    // Mid-nibble: there is no line to draw between two cells.
+    expect(ruler(info('2001:db8::/34')).boundary).toBeNull();
+  });
+
+  it('marks a nibble the prefix cuts through as split', () => {
+    const r = ruler(info('2001:db8::/34'));
+    // 34 bits is eight whole nibbles plus half of the ninth.
+    expect(r.cells.filter((c) => c.part === 'network')).toHaveLength(8);
+    expect(r.cells[8].part).toBe('split');
+    expect(r.cells.filter((c) => c.part === 'split')).toHaveLength(1);
+  });
+
+  it('never loses a cell, whatever the prefix', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 32 }), (prefix) => {
+        const r = ruler(info(`10.20.30.40/${prefix}`));
+        expect(r.cells).toHaveLength(32);
+        expect(r.cells.filter((c) => c.part === 'network')).toHaveLength(prefix);
+      }),
+      { numRuns: 33 },
+    );
   });
 });
 

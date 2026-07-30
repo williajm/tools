@@ -113,7 +113,7 @@ a:hover { text-decoration-thickness: 2px; }
   text-decoration: none;
   white-space: nowrap;
 }
-.topbar__home::before { content: '⌗ '; color: var(--accent); }
+.wordmark { color: var(--accent); margin-right: 7px; vertical-align: -1px; }
 
 .topbar__spacer { flex: 1; }
 
@@ -285,9 +285,10 @@ table.data th {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-dim);
-  position: sticky;
-  top: 0;
 }
+/* Only column headers stick. A row header (th scope="row") pinned to the top of
+   a scroll container drifts over the rows it labels. */
+table.data thead th { position: sticky; top: 0; }
 table.data td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 table.data tbody tr:hover { background: var(--bg-sunk); }
 
@@ -349,6 +350,34 @@ table.diff .diff__skip td {
   user-select: none;
 }
 
+/* Words that actually changed, inside an already-tinted line. Mixed from the
+   same tokens so the emphasis tracks the theme instead of being hard-coded. */
+table.diff .diff__word {
+  background: transparent;
+  color: inherit;
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+}
+table.diff .diff__del .diff__word { background: color-mix(in srgb, var(--danger) 28%, transparent); }
+table.diff .diff__ins .diff__word { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+/* Change tally. Deliberately not a .note: a diff finding differences is the
+   expected result, and an amber slab would read as a problem. */
+.tally {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  font-family: var(--mono);
+  padding: 2px 0;
+}
+.tally__add { color: var(--ok); font-weight: 600; }
+.tally__del { color: var(--danger); font-weight: 600; }
+.tally__unit { color: var(--text); }
+.tally__rest { color: var(--text-faint); }
+
 .inline-diff ins {
   background: var(--accent-bg);
   color: var(--ok);
@@ -358,6 +387,85 @@ table.diff .diff__skip td {
   background: var(--danger-bg);
   color: var(--danger);
 }
+
+/* --- prefix ruler (CIDR) ---------------------------------------------------- */
+
+.ruler {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px 16px;
+}
+
+.ruler__track {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  row-gap: 6px;
+  font-family: var(--mono);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.ruler__cell {
+  width: 1.3ch;
+  padding: 5px 0.3ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 2px solid transparent;
+}
+
+/* The cut itself: where the network stops and the host begins. */
+.ruler__mark {
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  margin: 0 6px;
+  padding: 0 6px;
+  border-left: 2px solid var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.ruler__cell--network {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-bottom-color: var(--accent);
+}
+.ruler__cell--host {
+  color: var(--text-dim);
+  background: var(--bg-sunk);
+  border-bottom-color: var(--border-strong);
+}
+/* A prefix that ends mid-nibble: half the cell belongs to each side. */
+.ruler__cell--split {
+  color: var(--text);
+  background: linear-gradient(90deg, var(--accent-bg) 50%, var(--bg-sunk) 50%);
+  border-bottom-color: var(--warn);
+}
+
+.ruler__sep { color: var(--text-faint); padding: 5px 0.4ch; align-self: center; }
+
+.ruler__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.ruler__key { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.ruler__key::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.ruler__key--network::before { background: var(--accent); }
+.ruler__key--host::before { background: var(--border-strong); }
 
 /* --- home index ------------------------------------------------------------ */
 

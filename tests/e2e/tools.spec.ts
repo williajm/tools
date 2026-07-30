@@ -43,3 +43,21 @@ test('the diff reports identical input as identical', async ({ page }) => {
   await page.getByLabel('Right').fill('same');
   await expect(page.getByText('No differences')).toBeVisible();
 });
+
+test('the diff marks the words that changed, not just the lines', async ({ page }) => {
+  await page.goto('./diff/');
+  await page.getByLabel('Left').fill('jumps over the lazy dog');
+  await page.getByLabel('Right').fill('leaps over the lazy dog');
+
+  await expect(page.locator('.diff__del .diff__word')).toHaveText(['jumps']);
+  await expect(page.locator('.diff__ins .diff__word')).toHaveText(['leaps']);
+});
+
+test('the CIDR ruler shows where the network stops', async ({ page }) => {
+  await page.goto('./cidr/');
+  await page.getByLabel('IP address or CIDR block').fill('172.16.0.0/12');
+
+  await expect(page.locator('.ruler__mark')).toHaveText('/12');
+  await expect(page.locator('.ruler__cell--network')).toHaveCount(12);
+  await expect(page.locator('.ruler__cell--host')).toHaveCount(20);
+});
