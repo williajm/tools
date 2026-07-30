@@ -28,7 +28,15 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `npm run build && npx vite preview --host ${HOST} --port ${PORT} --strictPort`,
+    // CI has already run `npm run build`, so rebuilding here would do the same
+    // work twice. Locally the build is included, since `npm run test:e2e` on its
+    // own has to have something to serve.
+    command: [
+      process.env.PLAYWRIGHT_SKIP_BUILD ? null : 'npm run build',
+      `npx vite preview --host ${HOST} --port ${PORT} --strictPort`,
+    ]
+      .filter(Boolean)
+      .join(' && '),
     url: URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

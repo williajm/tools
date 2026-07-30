@@ -51,8 +51,12 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
+      # Playwright serves the dist/ produced by the step above rather than
+      # building again — see PLAYWRIGHT_SKIP_BUILD in playwright.config.ts.
       - name: End-to-end tests
         run: npm run test:e2e
+        env:
+          PLAYWRIGHT_SKIP_BUILD: '1'
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
