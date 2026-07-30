@@ -297,3 +297,95 @@ describe('checkSchema', () => {
     expect(checkSchema({ enum: [{ type: 'anything' }] })).toBeNull();
   });
 });
+
+/**
+ * Regression: the keyword walk descended into every key except const and enum,
+ * so instance data was read as schema. A schema describing an object with a
+ * field called "type" was rejected outright.
+ */
+describe('checkSchema follows only subschema keywords', () => {
+  it('accepts a property literally named "type"', () => {
+    expect(checkSchema({ properties: { type: { type: 'string' } } })).toBeNull();
+    expect(checkSchema({ properties: { type: { enum: ['a', 'b'] } } })).toBeNull();
+  });
+
+  it('accepts annotation keywords holding instance data', () => {
+    expect(checkSchema({ default: { type: 'invoice' } })).toBeNull();
+    expect(checkSchema({ examples: [{ type: 'cat' }] })).toBeNull();
+    expect(checkSchema({ const: { type: 'anything' } })).toBeNull();
+    expect(checkSchema({ enum: [{ type: 'anything' }] })).toBeNull();
+    expect(checkSchema({ title: 'type', description: 'type' })).toBeNull();
+  });
+
+  it('still catches a misspelled type at the root', () => {
+    expect(checkSchema({ type: 'sting' })).toMatch(/not a JSON Schema type/);
+  });
+
+  it('still catches one inside a real subschema', () => {
+    expect(checkSchema({ properties: { a: { type: 'boolen' } } })).toMatch(/#\/properties\/a/);
+    expect(checkSchema({ items: { type: 'nope' } })).toMatch(/#\/items/);
+    expect(checkSchema({ allOf: [{ type: 'object' }, { type: 'nope' }] })).toMatch(/#\/allOf\/1/);
+    expect(checkSchema({ not: { type: 'nope' } })).toMatch(/#\/not/);
+    expect(checkSchema({ $defs: { X: { type: 'nope' } } })).toMatch(/#\/\$defs\/X/);
+    expect(checkSchema({ if: { type: 'nope' } })).toMatch(/#\/if/);
+  });
+
+  it('accepts a realistic schema end to end', async () => {
+    const schema = JSON.stringify({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      required: ['type', 'amount'],
+      properties: {
+        type: { type: 'string', enum: ['invoice', 'credit'] },
+        amount: { type: 'number', minimum: 0 },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      default: { type: 'invoice', amount: 0 },
+      examples: [{ type: 'credit', amount: 5 }],
+    });
+    expect(checkSchema(JSON.parse(schema))).toBeNull();
+    const ok = await validateSchema({ type: 'invoice', amount: 1 }, schema);
+    expect(ok.valid).toBe(true);
+    const bad = await validateSchema({ type: 'invoice' }, schema);
+    expect(bad.valid).toBe(false);
+    expect(bad.error).toBeUndefined();
+  });
+});
+
+/**
+ * Regression: `key in object` consults the prototype chain, so a key named
+ * toString, constructor or __proto__ compared against a document lacking it
+ * reported a change against the inherited value instead of an addition.
+ */
+describe('diffJson uses own properties only', () => {
+  it('reports an inherited-looking key as an addition', () => {
+    for (const key of ['toString', 'constructor', '__proto__', 'valueOf', 'hasOwnProperty']) {
+      const right = JSON.parse(`{"${key}":1}`) as Record<string, unknown>;
+      const entries = diffJson({}, right);
+      expect(entries, key).toHaveLength(1);
+      expect(entries[0]!.kind, key).toBe('added');
+      expect(entries[0]!.right, key).toBe('1');
+      expect(entries[0]!.left, key).toBeUndefined();
+    }
+  });
+
+  it('reports removal of such a key too', () => {
+    const left = JSON.parse('{"toString":1}') as Record<string, unknown>;
+    const entries = diffJson(left, {});
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.kind).toBe('removed');
+  });
+
+  it('never leaks a function into the diff', () => {
+    const entries = diffJson({}, JSON.parse('{"toString":1}') as Record<string, unknown>);
+    expect(JSON.stringify(entries)).not.toContain('native code');
+  });
+
+  it('still reports a real change on such a key', () => {
+    const left = JSON.parse('{"toString":1}') as Record<string, unknown>;
+    const right = JSON.parse('{"toString":2}') as Record<string, unknown>;
+    expect(diffJson(left, right)).toEqual([
+      { path: '$.toString', kind: 'changed', left: '1', right: '2' },
+    ]);
+  });
+});

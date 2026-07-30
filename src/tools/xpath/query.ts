@@ -66,6 +66,25 @@ export function parseDocument(source: string, kind: DocumentKind): { doc?: Docum
 }
 
 /**
+ * Whether element names in this document are case-sensitive.
+ *
+ * HTML normalises `tagName` to upper case and matches selectors case-insensitively,
+ * so lower-casing is the right presentation there. XML preserves case and matches
+ * exactly: `/root/item` selects nothing in a document of `<Root><Item/></Root>`.
+ * Lower-casing regardless meant XML mode handed back locators that matched
+ * nothing — and jsdom cannot catch it, since its XPath is case-insensitive where
+ * a browser's is not.
+ */
+function isCaseSensitive(node: Node): boolean {
+  return node.ownerDocument?.contentType !== 'text/html';
+}
+
+/** The element's name as a selector for its own document. */
+function tagOf(element: Element): string {
+  return isCaseSensitive(element) ? element.tagName : element.tagName.toLowerCase();
+}
+
+/**
  * CSS.escape is available in every current browser but absent from some
  * non-browser DOM implementations, so fall back rather than crash.
  */
@@ -126,7 +145,7 @@ export function cssPathOf(element: Element): string {
       break;
     }
 
-    const tag = current.tagName.toLowerCase();
+    const tag = tagOf(current);
     const parent: Element | null = current.parentElement;
     if (!parent) {
       parts.unshift(tag);
@@ -158,20 +177,45 @@ export function xpathOf(node: Node): string {
     const element = current as Element;
     const parent: Element | null = element.parentElement;
     if (!parent) {
-      parts.unshift(`/${element.tagName.toLowerCase()}`);
+      parts.unshift(`/${tagOf(element)}`);
       break;
     }
     const siblings = [...parent.children].filter((c) => c.tagName === element.tagName);
     const index = siblings.indexOf(element) + 1;
     parts.unshift(
-      siblings.length > 1
-        ? `/${element.tagName.toLowerCase()}[${index}]`
-        : `/${element.tagName.toLowerCase()}`,
+      siblings.length > 1 ? `/${tagOf(element)}[${index}]` : `/${tagOf(element)}`,
     );
     current = parent;
   }
 
   return parts.join('') || '/';
+}
+
+/**
+ * Namespace resolver built from the document's own declarations.
+ *
+ * `document.evaluate` with a null resolver throws `NamespaceError` the moment the
+ * expression carries a prefix, so `//x:Item` failed even with `xmlns:x` declared
+ * in the pasted document. jsdom accepts it regardless, which is why the unit
+ * tests could not see this — only a browser can.
+ *
+ * Only declared prefixes are mapped. XPath 1.0 has no default namespace, so an
+ * unprefixed name means "no namespace" and must keep meaning that.
+ */
+function namespaceResolver(doc: Document): XPathNSResolver {
+  const byPrefix = new Map<string, string>();
+
+  const walk = (element: Element) => {
+    for (const attr of element.attributes) {
+      if (attr.name.startsWith('xmlns:')) byPrefix.set(attr.name.slice(6), attr.value);
+    }
+    for (const child of element.children) walk(child);
+  };
+  if (doc.documentElement) walk(doc.documentElement);
+
+  return {
+    lookupNamespaceURI: (prefix) => (prefix ? byPrefix.get(prefix) ?? null : null),
+  };
 }
 
 const MAX_HITS = 500;
@@ -187,7 +231,7 @@ function describe(node: Node, position: number): Hit {
   return {
     position,
     nodeType,
-    nodeName: node.nodeName.toLowerCase(),
+    nodeName: isCaseSensitive(node) ? node.nodeName : node.nodeName.toLowerCase(),
     markup,
     textContent: node.textContent ?? '',
     cssPath: node.nodeType === 1 ? cssPathOf(node as Element) : undefined,
@@ -213,7 +257,10 @@ export function query(source: string, expression: string, language: Language, ki
   }
 
   try {
-    const evaluated = doc.evaluate(expression, doc, null, 0 /* ANY_TYPE */, null);
+    // XML needs a resolver for prefixed names; HTML has none to resolve, so it
+    // keeps the null it always had.
+    const resolver = kind === 'xml' ? namespaceResolver(doc) : null;
+    const evaluated = doc.evaluate(expression, doc, resolver, 0 /* ANY_TYPE */, null);
 
     switch (evaluated.resultType) {
       case 1: // NUMBER
@@ -263,15 +310,22 @@ function quote(value: string): string {
   return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 }
 
-export function toLocator(hit: Hit, flavour: LocatorFlavour): string {
-  const css = hit.cssPath ?? '';
-  const xpath = hit.xpath ?? '';
+/**
+ * A locator for this hit, or null when the flavour cannot express it.
+ *
+ * Only elements have a CSS path, so an attribute or text result has nothing a
+ * CSS-based flavour can select. Substituting an empty string produced
+ * `page.locator('')` — a selector that is not merely useless but wrong, and looks
+ * copy-pasteable. Declining lets the UI grey the option out instead.
+ */
+export function toLocator(hit: Hit, flavour: LocatorFlavour): string | null {
+  const { cssPath: css, xpath } = hit;
 
   switch (flavour) {
-    case 'playwright-css': return `page.locator(${quote(css)})`;
-    case 'playwright-xpath': return `page.locator(${quote(`xpath=${xpath}`)})`;
-    case 'selenium-css': return `driver.find_element(By.CSS_SELECTOR, ${quote(css)})`;
-    case 'selenium-xpath': return `driver.find_element(By.XPATH, ${quote(xpath)})`;
-    case 'cypress': return `cy.get(${quote(css)})`;
+    case 'playwright-css': return css ? `page.locator(${quote(css)})` : null;
+    case 'playwright-xpath': return xpath ? `page.locator(${quote(`xpath=${xpath}`)})` : null;
+    case 'selenium-css': return css ? `driver.find_element(By.CSS_SELECTOR, ${quote(css)})` : null;
+    case 'selenium-xpath': return xpath ? `driver.find_element(By.XPATH, ${quote(xpath)})` : null;
+    case 'cypress': return css ? `cy.get(${quote(css)})` : null;
   }
 }

@@ -203,3 +203,97 @@ describe('rng', () => {
     expect([...out].sort()).toEqual(input);
   });
 });
+
+/**
+ * Regression: the classic opening was prepended after the requested amount had
+ * been generated, so it silently overrode the count — "12 words" returned 20 and
+ * "3 sentences" returned 4.
+ */
+describe('the classic opening counts towards the total', () => {
+  const base = { script: 'latin', format: 'text', seed: 's' } as const;
+  const words = (s: string) => s.trim().split(/\s+/).length;
+  const sentences = (s: string) => (s.match(/\./g) ?? []).length;
+
+  it('returns exactly the requested number of words', () => {
+    for (const count of [1, 3, 8, 12, 40]) {
+      const out = generate({ ...base, unit: 'words', count, classicOpening: true });
+      expect(words(out), `${count} words`).toBe(count);
+    }
+  });
+
+  it('returns exactly the requested number of sentences', () => {
+    for (const count of [1, 3, 10]) {
+      const out = generate({ ...base, unit: 'sentences', count, classicOpening: true });
+      expect(sentences(out), `${count} sentences`).toBe(count);
+    }
+  });
+
+  it('still opens with the conventional phrase', () => {
+    const out = generate({ ...base, unit: 'words', count: 12, classicOpening: true });
+    expect(out.startsWith('Lorem ipsum dolor sit amet')).toBe(true);
+  });
+
+  it('truncates the opening when fewer words are asked for than it contains', () => {
+    const out = generate({ ...base, unit: 'words', count: 2, classicOpening: true });
+    expect(out).toBe('Lorem ipsum');
+  });
+
+  it('leaves block counts alone, where the opening goes inside the first block', () => {
+    // Text format joins every unit's blocks with a blank line.
+    for (const unit of ['paragraphs', 'list-items'] as const) {
+      const out = generate({ ...base, unit, count: 3, classicOpening: true });
+      expect(out.split('\n\n'), unit).toHaveLength(3);
+      expect(out.startsWith('Lorem ipsum'), unit).toBe(true);
+    }
+  });
+
+  it('is unaffected when the opening is off', () => {
+    expect(words(generate({ ...base, unit: 'words', count: 12, classicOpening: false }))).toBe(12);
+  });
+
+  it('does not apply to non-Latin scripts', () => {
+    const out = generate({
+      script: 'japanese', unit: 'sentences', count: 2, format: 'text', seed: 's', classicOpening: true,
+    });
+    expect(out).not.toContain('Lorem');
+  });
+});
+
+/**
+ * Regression: byte mode stopped as soon as the next code point would not fit, so
+ * a 2-byte budget for a 3-byte-per-character script returned an empty string and
+ * a 4-byte budget returned 3 — in a mode whose whole purpose is an exact length.
+ */
+describe('byte mode hits the budget exactly', () => {
+  const bytes = (s: string) => new TextEncoder().encode(s).length;
+
+  it('is exact for a multi-byte script at awkward budgets', () => {
+    for (const script of ['japanese', 'cjk-han', 'arabic'] as const) {
+      for (const count of [1, 2, 3, 4, 5, 7, 10, 100]) {
+        const out = generate({ script, unit: 'bytes', count, format: 'text', seed: 's', classicOpening: false });
+        expect(bytes(out), `${script} ${count}`).toBe(count);
+      }
+    }
+  });
+
+  it('is exact for Latin too', () => {
+    for (const count of [1, 2, 10, 500]) {
+      const out = generate({ script: 'latin', unit: 'bytes', count, format: 'text', seed: 's', classicOpening: false });
+      expect(bytes(out)).toBe(count);
+    }
+  });
+
+  it('never returns empty for a positive budget', () => {
+    for (const script of ['japanese', 'cjk-han', 'latin'] as const) {
+      const out = generate({ script, unit: 'bytes', count: 2, format: 'text', seed: 's', classicOpening: false });
+      expect(out.length, script).toBeGreaterThan(0);
+    }
+  });
+
+  it('leaves character mode exact as before', () => {
+    for (const count of [1, 5, 50]) {
+      const out = generate({ script: 'japanese', unit: 'characters', count, format: 'text', seed: 's', classicOpening: false });
+      expect([...out]).toHaveLength(count);
+    }
+  });
+});

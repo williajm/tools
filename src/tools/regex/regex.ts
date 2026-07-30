@@ -148,7 +148,12 @@ export function runTests(regex: RegExp, cases: TestCase[]): TestOutcome[] {
   return cases.map((testCase) => {
     // Fresh regex per case: a stale lastIndex from a /g pattern would make
     // results depend on row order, which would be a maddening bug to chase.
-    const re = new RegExp(regex.source, regex.flags.replace(/[gy]/g, ''));
+    //
+    // Only `g` is dropped. `y` was going too, which silently changed what the
+    // pattern means — sticky anchors the match at lastIndex, so `/abc/y` must not
+    // match "xabc", yet the table tested it as `/abc/` and reported a pass. A
+    // fresh regex already starts at lastIndex 0, so sticky needs no help here.
+    const re = new RegExp(regex.source, regex.flags.replace(/g/g, ''));
     const match = re.exec(testCase.input);
     const matched = match !== null;
     return {

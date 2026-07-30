@@ -408,3 +408,47 @@ suite('formatCount', () => {
     expect(formatCount(254n)).toBe('254');
   });
 });
+
+/**
+ * Regression: set algebra went straight to cidr-tools, which rewrites malformed
+ * input rather than refusing it. `300.1.1.1` became `44.1.1.1/32`, so the tool
+ * answered confidently about a network nobody asked about — the exact failure
+ * `describe` already guarded against.
+ */
+suite('compareSets validates its input', () => {
+  it('rejects an out-of-range octet instead of rewriting it', () => {
+    const result = compareSets('300.1.1.1', '10.0.0.0/8');
+    expect(result.error).toMatch(/not a valid address or CIDR block/);
+    expect(result.error).toContain('300.1.1.1');
+    expect(result.mergedA).toEqual([]);
+    // The silently rewritten address must appear nowhere in the output.
+    expect(JSON.stringify(result)).not.toContain('44.1.1.1');
+  });
+
+  it('rejects malformed IPv6 in either list', () => {
+    expect(compareSets('2001:db8:::1', '::/0').error).toBeTruthy();
+    expect(compareSets('::/0', '2001:db8:::1').error).toBeTruthy();
+  });
+
+  it('names every bad entry, not just the first', () => {
+    const result = compareSets('300.1.1.1\n10.0.0.0/8\nnope', '');
+    expect(result.error).toContain('300.1.1.1');
+    expect(result.error).toContain('nope');
+  });
+
+  it('rejects an out-of-range prefix', () => {
+    expect(compareSets('10.0.0.0/33', '10.0.0.0/8').error).toBeTruthy();
+  });
+
+  it('still does the algebra for valid input', () => {
+    const result = compareSets('10.0.0.0/8', '10.0.0.0/16');
+    expect(result.error).toBeUndefined();
+    expect(result.aContainsB).toBe(true);
+    expect(result.bContainsA).toBe(false);
+    expect(result.overlaps).toBe(true);
+  });
+
+  it('still accepts a single address without a prefix', () => {
+    expect(compareSets('10.0.0.5', '10.0.0.0/8').error).toBeUndefined();
+  });
+});

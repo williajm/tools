@@ -271,3 +271,36 @@ describe('evaluate', () => {
     expect(() => structuredClone(evaluate(base))).not.toThrow();
   });
 });
+
+/**
+ * Regression: runTests stripped `y` along with `g`, which changed what the
+ * pattern means. Sticky anchors the match at lastIndex, so /abc/y must not match
+ * "xabc" — but the table tested it as /abc/ and reported a pass.
+ */
+describe('sticky semantics survive the test table', () => {
+  it('does not match away from the anchor', () => {
+    const [outcome] = runTests(/abc/y, parseTestCases('xabc'));
+    expect(outcome!.matched).toBe(false);
+    expect(outcome!.pass).toBe(false);
+    // Which is what the real regex does.
+    expect(/abc/y.test('xabc')).toBe(false);
+  });
+
+  it('still matches at the anchor', () => {
+    expect(runTests(/abc/y, parseTestCases('abcdef'))[0]!.matched).toBe(true);
+  });
+
+  it('agrees with a fresh sticky regex on every case', () => {
+    for (const input of ['abc', 'xabc', 'abcx', '', 'ab']) {
+      const expected = new RegExp('abc', 'y').test(input);
+      expect(runTests(/abc/y, parseTestCases(input || 'x'))[0]!.matched, input).toBe(
+        input === '' ? new RegExp('abc', 'y').test('x') : expected,
+      );
+    }
+  });
+
+  it('still drops the global flag, so row order cannot matter', () => {
+    const repeated = parseTestCases('aaa\naaa\naaa\naaa');
+    expect(runTests(/a+/g, repeated).every((o) => o.matched)).toBe(true);
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cssPathOf, parseDocument, query, toLocator, xpathOf } from './query.ts';
+import { LOCATOR_NAMES, cssPathOf, parseDocument, query, toLocator, xpathOf } from './query.ts';
 
 const HTML = `<!doctype html>
 <html><body>
@@ -253,7 +253,7 @@ describe('toLocator', () => {
 
   it('escapes quotes so the locator stays a valid single-quoted literal', () => {
     const tricky = { ...hit, cssPath: "div[title='it\\'s']" };
-    const out = toLocator(tricky, 'cypress');
+    const out = toLocator(tricky, 'cypress')!;
 
     // Nothing inside the literal may terminate it early.
     const inner = out.slice("cy.get('".length, -"')".length);
@@ -271,5 +271,83 @@ describe('safety', () => {
     const before = (globalThis as Record<string, unknown>)['__xss'];
     query('<img src=x onerror="globalThis.__xss=1"><script>globalThis.__xss=1</script>', '//img', 'xpath', 'html');
     expect((globalThis as Record<string, unknown>)['__xss']).toBe(before);
+  });
+});
+
+/**
+ * Regression: element names were lower-cased regardless of document type. XML
+ * preserves case and matches exactly, so `/root/item` selects nothing in a
+ * document of `<Root><Item/></Root>` — the locators handed back matched nothing.
+ * jsdom's XPath is case-insensitive, so the browser check lives in the e2e suite.
+ */
+describe('XML is case-sensitive', () => {
+  const XML = '<Root><Item id="a"/><Item/></Root>';
+
+  it('preserves element case in an XPath', () => {
+    const { doc } = parseDocument(XML, 'xml');
+    const second = doc!.getElementsByTagName('Item')[1]!;
+    expect(xpathOf(second)).toBe('/Root/Item[2]');
+  });
+
+  it('preserves element case in a CSS path', () => {
+    const { doc } = parseDocument(XML, 'xml');
+    const second = doc!.getElementsByTagName('Item')[1]!;
+    expect(cssPathOf(second)).toBe('Root > Item:nth-of-type(2)');
+  });
+
+  it('preserves case in the reported node name', () => {
+    const result = query(XML, '//Item', 'xpath', 'xml');
+    expect(result.hits[0]!.nodeName).toBe('Item');
+  });
+
+  it('still lower-cases for HTML, where selectors are case-insensitive', () => {
+    const { doc } = parseDocument('<html><body><DIV><P>x</P></DIV></body></html>', 'html');
+    const p = doc!.getElementsByTagName('p')[0]!;
+    expect(xpathOf(p)).toBe('/html/body/div/p');
+    expect(cssPathOf(p)).toBe('html > body > div > p');
+  });
+});
+
+/**
+ * Regression: an attribute or text hit has no CSS path, and the empty string was
+ * substituted — producing `page.locator('')`, which is not merely useless but
+ * wrong, and looks copy-pasteable.
+ */
+describe('toLocator declines what it cannot express', () => {
+  const attrHit = {
+    position: 1,
+    nodeType: 'attribute',
+    nodeName: 'href',
+    markup: 'href="/x"',
+    textContent: '/x',
+    xpath: '/html/body/a/@href',
+  };
+
+  it('returns null for CSS flavours on an attribute', () => {
+    expect(toLocator(attrHit, 'playwright-css')).toBeNull();
+    expect(toLocator(attrHit, 'selenium-css')).toBeNull();
+    expect(toLocator(attrHit, 'cypress')).toBeNull();
+  });
+
+  it('still returns an XPath locator for an attribute', () => {
+    expect(toLocator(attrHit, 'playwright-xpath')).toContain('/html/body/a/@href');
+    expect(toLocator(attrHit, 'selenium-xpath')).toContain('/html/body/a/@href');
+  });
+
+  it('returns null for every flavour on a text node, which has neither path', () => {
+    const textHit = { ...attrHit, nodeType: 'text', nodeName: '#text', xpath: undefined };
+    for (const flavour of Object.keys(LOCATOR_NAMES) as Array<keyof typeof LOCATOR_NAMES>) {
+      expect(toLocator(textHit, flavour), flavour).toBeNull();
+    }
+  });
+
+  it('never emits an empty selector', () => {
+    const hits = [attrHit, { ...attrHit, nodeType: 'text', xpath: undefined }];
+    for (const hit of hits) {
+      for (const flavour of Object.keys(LOCATOR_NAMES) as Array<keyof typeof LOCATOR_NAMES>) {
+        const out = toLocator(hit, flavour);
+        if (out !== null) expect(out, flavour).not.toMatch(/\(''\)|=''/);
+      }
+    }
   });
 });

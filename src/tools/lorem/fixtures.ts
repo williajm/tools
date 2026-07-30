@@ -31,10 +31,18 @@ export interface FieldDef {
   id: FieldId;
   label: string;
   note?: string;
+  /**
+   * How this column should be written in SQL. Declared per field rather than
+   * guessed from the value: inferring "numeric" from a digits-only string turned
+   * postcodes, phone numbers and card numbers into SQL numbers, dropping leading
+   * zeroes and overflowing INT on a 16-digit card. Defaults to text, which is the
+   * safe direction — a quoted number still inserts.
+   */
+  sql?: 'number' | 'boolean';
 }
 
 export const FIELDS: readonly FieldDef[] = [
-  { id: 'id', label: 'id (sequential)' },
+  { id: 'id', label: 'id (sequential)', sql: 'number' },
   { id: 'uuid', label: 'uuid' },
   { id: 'firstName', label: 'first_name' },
   { id: 'lastName', label: 'last_name' },
@@ -51,8 +59,8 @@ export const FIELDS: readonly FieldDef[] = [
   { id: 'iban', label: 'iban', note: 'Checksum-valid' },
   { id: 'creditCard', label: 'card_number', note: 'Luhn-valid test number' },
   { id: 'date', label: 'created_at' },
-  { id: 'bool', label: 'is_active' },
-  { id: 'price', label: 'price' },
+  { id: 'bool', label: 'is_active', sql: 'boolean' },
+  { id: 'price', label: 'price', sql: 'number' },
   { id: 'url', label: 'url' },
 ];
 
@@ -68,6 +76,15 @@ export const LOCALES = [
 ] as const;
 
 export type LocaleId = (typeof LOCALES)[number]['id'];
+
+/**
+ * Reference point the `date` field measures back from.
+ *
+ * Any constant would do; what matters is that it is not `Date.now()`. Seeding
+ * controls faker's random offset but not its reference date, so without this the
+ * same seed produced different timestamps on different days.
+ */
+const SEED_EPOCH = new Date('2025-01-01T00:00:00.000Z');
 
 export type Row = Record<string, string>;
 
@@ -129,7 +146,10 @@ function value(faker: import('@faker-js/faker').Faker, field: FieldId, index: nu
     case 'country': return faker.location.country();
     case 'iban': return faker.finance.iban();
     case 'creditCard': return faker.finance.creditCardNumber();
-    case 'date': return faker.date.past({ years: 3 }).toISOString();
+    // A fixed reference date, so the same seed gives the same dates. Without it
+    // faker measures the offset back from "now", making the output depend on the
+    // wall clock — which contradicts the tool's own promise of reproducibility.
+    case 'date': return faker.date.past({ years: 3, refDate: SEED_EPOCH }).toISOString();
     case 'bool': return String(faker.datatype.boolean());
     case 'price': return faker.commerce.price();
     case 'url': return faker.internet.url();
@@ -144,9 +164,18 @@ function csvCell(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-function sqlLiteral(value: string): string {
-  if (/^\d+$/.test(value)) return value;
-  if (value === 'true' || value === 'false') return value.toUpperCase();
+/**
+ * SQL kind per column name.
+ *
+ * Keyed by `labelOf`, not `label`: the row keys have the parenthetical stripped,
+ * so "id (sequential)" becomes the column "id".
+ */
+const SQL_KIND = new Map(FIELDS.map((f) => [labelOf(f.id), f.sql]));
+
+function sqlLiteral(value: string, kind: FieldDef['sql']): string {
+  if (kind === 'boolean') return value === 'true' ? 'TRUE' : 'FALSE';
+  // Still checked, so a column declared numeric cannot emit a bare non-number.
+  if (kind === 'number' && /^-?\d+(\.\d+)?$/.test(value)) return value;
   return `'${value.replace(/'/g, "''")}'`;
 }
 
@@ -167,7 +196,7 @@ export function serialise(rows: Row[], format: Export, table = 'fixtures'): stri
         .map(
           (r) =>
             `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns
-              .map((c) => sqlLiteral(r[c] ?? ''))
+              .map((c) => sqlLiteral(r[c] ?? '', SQL_KIND.get(c)))
               .join(', ')});`,
         )
         .join('\n');

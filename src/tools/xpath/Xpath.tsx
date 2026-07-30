@@ -126,7 +126,10 @@ export function Xpath() {
                 </select>
               </label>
               <CopyButton
-                value={result.hits.map((h) => toLocator(h, flavour)).join('\n')}
+                value={result.hits
+                  .map((h) => toLocator(h, flavour))
+                  .filter((locator): locator is string => locator !== null)
+                  .join('\n')}
                 label="Copy locators"
               />
             </div>
@@ -155,9 +158,21 @@ export function Xpath() {
                             <span class="faint">{hit.nodeType}</span>
                           </td>
                           <td class="mono wrap-anywhere small">{hit.markup}</td>
-                          <td class="mono wrap-anywhere small">{locator}</td>
+                          {/*
+                            A CSS flavour cannot address an attribute or text
+                            node, so say so rather than offering an empty
+                            selector that looks copy-pasteable.
+                          */}
+                          <td class="mono wrap-anywhere small">
+                            {locator ?? (
+                              <span class="faint">
+                                no {flavour.includes('xpath') ? 'XPath' : 'CSS'} locator for a{' '}
+                                {hit.nodeType} node
+                              </span>
+                            )}
+                          </td>
                           <td>
-                            <CopyButton value={locator} />
+                            <CopyButton value={locator ?? ''} />
                           </td>
                         </tr>
                       );

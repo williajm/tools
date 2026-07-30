@@ -316,10 +316,32 @@ const EMPTY_SET: SetResult = {
  * Mixed IPv4 and IPv6 lists are fine — the operations treat the two families as
  * disjoint, which is what `containsCidr` and `overlapCidr` already do.
  */
+/**
+ * Rejects any entry the calculator itself would reject.
+ *
+ * `cidr-tools` rewrites malformed input rather than refusing it — the same
+ * behaviour `describe` guards against, where `300.1.1.1` silently becomes
+ * `44.1.1.1`. Set algebra went straight to the library, so a typo produced a
+ * confident answer about a network nobody asked about. Every entry now goes
+ * through the same validation as a single address.
+ */
+function invalidEntries(entries: string[]): string[] {
+  return entries.filter((entry) => !describe(entry).ok);
+}
+
 export function compareSets(aText: string, bText: string): SetResult {
   const a = parseList(aText);
   const b = parseList(bText);
   if (a.length === 0 && b.length === 0) return EMPTY_SET;
+
+  const invalid = [...new Set([...invalidEntries(a), ...invalidEntries(b)])];
+  if (invalid.length > 0) {
+    const list = invalid.map((entry) => `“${entry}”`).join(', ');
+    return {
+      ...EMPTY_SET,
+      error: `${invalid.length === 1 ? 'This entry is' : 'These entries are'} not a valid address or CIDR block: ${list}.`,
+    };
+  }
 
   try {
     return {

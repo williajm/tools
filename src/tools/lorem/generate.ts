@@ -71,6 +71,24 @@ function trimTo(text: string, limit: number, mode: 'characters' | 'bytes'): stri
     out += ch;
     used += size;
   }
+
+  /**
+   * Fill the remainder with single-byte characters so the budget is met exactly.
+   *
+   * A multi-byte script cannot always land on the target: a Japanese character is
+   * three bytes, so a two-byte budget could not be filled at all and returned an
+   * empty string, and a four-byte budget stopped at three. This mode exists to
+   * produce a value of an exact byte length — for a column limit or a header
+   * budget — so falling short is the one thing it must not do. ASCII letters are
+   * the only characters that can close a gap of one or two bytes.
+   */
+  const FILLER = 'abcdefghijklmnopqrstuvwxyz';
+  let index = 0;
+  while (used < limit) {
+    out += FILLER[index++ % FILLER.length];
+    used += 1;
+  }
+
   return out;
 }
 
@@ -138,16 +156,38 @@ export function generate(options: Options): string {
 
   const count = Math.max(1, Math.min(MAX_BLOCKS, requested));
 
+  /**
+   * The classic opening is content, so it counts towards what was asked for.
+   *
+   * Prepending it after generating the full amount meant "12 words" returned 20
+   * and "3 sentences" returned 4 — the option quietly overrode the count. Only
+   * words and sentences are affected: for paragraphs and list items the opening
+   * goes inside the first block, which leaves the number of blocks alone.
+   */
+  const openingWords = CLASSIC_OPENING.split(' ');
+  const usesOpening = classicOpening && script === 'latin';
+
   let blocks: string[];
   switch (unit) {
     case 'words': {
-      const words = Array.from({ length: count }, () => rng.pick(def.words));
+      // A count below the opening's own length takes as much of it as fits.
+      const fromOpening = usesOpening ? Math.min(count, openingWords.length) : 0;
+      const words = [
+        ...openingWords.slice(0, fromOpening),
+        ...Array.from({ length: count - fromOpening }, () => rng.pick(def.words)),
+      ];
       blocks = [joinWords(words, def.unspaced)];
       break;
     }
-    case 'sentences':
-      blocks = [Array.from({ length: count }, () => sentence(rng, script)).join(' ')];
+    case 'sentences': {
+      const fromOpening = usesOpening ? Math.min(count, 1) : 0;
+      const sentences = [
+        ...(fromOpening ? [`${CLASSIC_OPENING}.`] : []),
+        ...Array.from({ length: count - fromOpening }, () => sentence(rng, script)),
+      ];
+      blocks = [sentences.join(' ')];
       break;
+    }
     case 'list-items':
       blocks = Array.from({ length: count }, () => sentence(rng, script).replace(/[.。]$/, ''));
       break;
@@ -157,8 +197,9 @@ export function generate(options: Options): string {
       break;
   }
 
-  // Only meaningful for Latin, where the convention comes from.
-  if (classicOpening && script === 'latin' && blocks.length > 0) {
+  // Words and sentences already folded the opening into their count above; for
+  // these units it prefixes the first block without changing how many there are.
+  if (usesOpening && blocks.length > 0 && (unit === 'paragraphs' || unit === 'list-items')) {
     blocks[0] = `${CLASSIC_OPENING}. ${blocks[0]!}`;
   }
 

@@ -228,23 +228,60 @@ const JSON_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Keywords whose value is itself a subschema.
+ *
+ * Recursion has to follow these and nothing else. Descending into every key
+ * except `const` and `enum` treated instance data as schema, so a schema
+ * describing an object with a field called "type" — `{"properties":{"type":
+ * {"type":"string"}}}`, about as ordinary as schemas get — was rejected, as were
+ * `default` and `examples` holding any object with a `type` member.
+ */
+const SUBSCHEMA_KEYWORDS: ReadonlySet<string> = new Set([
+  'additionalItems',
+  'unevaluatedItems',
+  'items',
+  'contains',
+  'additionalProperties',
+  'unevaluatedProperties',
+  'propertyNames',
+  'not',
+  'if',
+  'then',
+  'else',
+]);
+
+/** Keywords holding an array of subschemas. */
+const SUBSCHEMA_ARRAY_KEYWORDS: ReadonlySet<string> = new Set([
+  'prefixItems',
+  'items',
+  'allOf',
+  'anyOf',
+  'oneOf',
+]);
+
+/** Keywords holding a map of name to subschema. */
+const SUBSCHEMA_MAP_KEYWORDS: ReadonlySet<string> = new Set([
+  '$defs',
+  'definitions',
+  'properties',
+  'patternProperties',
+  'dependentSchemas',
+]);
+
+/**
  * Catches the schema mistakes the validator would otherwise swallow.
  *
  * A misspelled `type` is accepted silently and then fails every instance, so the
  * document under test gets blamed for a typo in the schema. That is the same
  * failure mode the CIDR parser guards against: confidently answering a question
  * nobody asked. A bad `pattern` throws from the validator, so it needs no check.
+ *
+ * Only the keywords above are followed. Everything else is either an assertion
+ * whose value is data, or annotation such as `default`, `examples` and `const` —
+ * where a `type` member belongs to the user's instance, not to the schema.
  */
 export function checkSchema(schema: unknown, path = '#'): string | null {
-  if (Array.isArray(schema)) {
-    for (const [index, item] of schema.entries()) {
-      const problem = checkSchema(item, `${path}/${index}`);
-      if (problem) return problem;
-    }
-    return null;
-  }
-
-  if (schema === null || typeof schema !== 'object') return null;
+  if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) return null;
 
   for (const [key, child] of Object.entries(schema as Record<string, unknown>)) {
     if (key === 'type') {
@@ -261,11 +298,27 @@ export function checkSchema(schema: unknown, path = '#'): string | null {
       }
       continue;
     }
-    // `const` and `enum` hold instance data, not subschemas, so a "type" inside
-    // them is a value rather than a keyword and must not be checked.
-    if (key === 'const' || key === 'enum') continue;
-    const problem = checkSchema(child, `${path}/${key}`);
-    if (problem) return problem;
+
+    // `items` and `prefixItems` may be a single schema or an array of them.
+    if (Array.isArray(child) && SUBSCHEMA_ARRAY_KEYWORDS.has(key)) {
+      for (const [index, item] of child.entries()) {
+        const problem = checkSchema(item, `${path}/${key}/${index}`);
+        if (problem) return problem;
+      }
+      continue;
+    }
+    if (SUBSCHEMA_KEYWORDS.has(key)) {
+      const problem = checkSchema(child, `${path}/${key}`);
+      if (problem) return problem;
+      continue;
+    }
+    if (SUBSCHEMA_MAP_KEYWORDS.has(key) && child !== null && typeof child === 'object') {
+      for (const [name, sub] of Object.entries(child as Record<string, unknown>)) {
+        const problem = checkSchema(sub, `${path}/${key}/${name}`);
+        if (problem) return problem;
+      }
+      continue;
+    }
   }
 
   return null;
@@ -372,8 +425,14 @@ export function diffJson(left: unknown, right: unknown, path = '$'): DiffEntry[]
   const entries: DiffEntry[] = [];
   for (const key of keys) {
     const childPath = `${path}.${key}`;
-    const inLeft = key in leftObj;
-    const inRight = key in rightObj;
+    // `in` consults the prototype chain, so a document with a key named
+    // "toString", "constructor" or "__proto__" compared against one without it
+    // reported a change against the inherited value — `{}` vs `{"toString":1}`
+    // showed `function toString() { [native code] }` as the left-hand side —
+    // rather than the addition it is. JSON.parse creates these as own
+    // properties, so hasOwn is the question actually being asked.
+    const inLeft = Object.hasOwn(leftObj, key);
+    const inRight = Object.hasOwn(rightObj, key);
     if (!inLeft) entries.push({ path: childPath, kind: 'added', right: render(rightObj[key]) });
     else if (!inRight) entries.push({ path: childPath, kind: 'removed', left: render(leftObj[key]) });
     else entries.push(...diffJson(leftObj[key], rightObj[key], childPath));
