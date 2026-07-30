@@ -62,6 +62,13 @@ test('every page forbids network connections in its own CSP', async ({ page }) =
       .getAttribute('content');
     expect(csp, path).toContain("connect-src 'none'");
     expect(csp, path).toContain("default-src 'self'");
+
+    // The theme bootstrap is inline script, allowed by a sha256 hash. Allowing it
+    // with 'unsafe-inline' instead would forfeit the protection the whole site
+    // rests on, so assert the easy shortcut was not taken.
+    expect(csp, path).not.toContain('unsafe-inline;');
+    expect(csp?.match(/script-src [^;]*/)?.[0], path).not.toContain('unsafe-inline');
+    expect(csp?.match(/script-src [^;]*/)?.[0], path).toMatch(/'sha256-[A-Za-z0-9+/=]+'/);
   }
 });
 
