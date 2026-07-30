@@ -83,7 +83,29 @@ export interface DiffResult {
   rows: Row[];
   inlineChanges: Change[];
   summary: Summary;
+  /**
+   * Set when the diff was abandoned on the time limit. Nothing else here is
+   * meaningful — an empty result is not "no differences".
+   */
+  tooLarge?: boolean;
 }
+
+const EMPTY_RESULT: DiffResult = {
+  rows: [],
+  inlineChanges: [],
+  summary: { added: 0, removed: 0, unchanged: 0, identical: false },
+};
+
+/**
+ * How long any one diff may run before it is abandoned.
+ *
+ * Myers is O(ND) in the edit distance, so two large dissimilar inputs cost time
+ * proportional to how different they are — and this runs synchronously while
+ * rendering, on every keystroke. jsdiff takes a `timeout` and returns undefined
+ * rather than an answer when it expires, which is the honest outcome: a partial
+ * diff would be indistinguishable from a real one.
+ */
+const DIFF_TIMEOUT_MS = 1500;
 
 export function computeDiff(
   leftRaw: string,
@@ -94,16 +116,17 @@ export function computeDiff(
   const left = normalise(leftRaw, options);
   const right = normalise(rightRaw, options);
 
-  const jsdiffOptions = {
-    ignoreCase: options.ignoreCase,
-    ignoreWhitespace: options.ignoreWhitespace,
-  };
-
   if (granularity !== 'lines') {
+    // `diffChars` honours only ignoreCase; `diffWords` treats whitespace runs as
+    // insignificant by construction, so neither takes ignoreWhitespace. Passing
+    // it did nothing, which is why the UI now hides the option in these modes.
+    const inlineOptions = { ignoreCase: options.ignoreCase, timeout: DIFF_TIMEOUT_MS };
     const changes =
       granularity === 'words'
-        ? diffWords(left, right, jsdiffOptions)
-        : diffChars(left, right, jsdiffOptions);
+        ? diffWords(left, right, inlineOptions)
+        : diffChars(left, right, inlineOptions);
+
+    if (!changes) return { ...EMPTY_RESULT, tooLarge: true };
 
     return {
       rows: [],
@@ -114,7 +137,11 @@ export function computeDiff(
 
   const changes = diffArrays(splitLines(left), splitLines(right), {
     comparator: lineEquals(options),
+    timeout: DIFF_TIMEOUT_MS,
   });
+
+  if (!changes) return { ...EMPTY_RESULT, tooLarge: true };
+
   const rows: Row[] = [];
   let leftNo = 0;
   let rightNo = 0;
@@ -295,24 +322,72 @@ export function wordSegments(
 }
 
 /**
+ * Splits text into the lines a patch is defined over: each keeps its terminator.
+ *
+ * Two things the display model deliberately throws away matter here. Empty text
+ * has no lines at all rather than one blank one, so creating content in an empty
+ * file is an insertion at line 0 rather than a replacement of a phantom line.
+ * And a final line without a newline is a different token from the same line with
+ * one, which is the only way a patch can represent adding or removing the
+ * newline at end of file — under the display model the two texts compare equal
+ * and produced no hunk whatsoever.
+ */
+export function patchTokens(text: string): string[] {
+  if (text === '') return [];
+  return text.match(/[^\n]*\n|[^\n]+/g) ?? [];
+}
+
+export interface UnifiedOptions {
+  leftName?: string;
+  rightName?: string;
+  context?: number;
+}
+
+const NO_EOL = '\\ No newline at end of file';
+
+/**
  * Unified diff text, for pasting into a patch or a review comment.
  *
  * Emitted as real hunks with `@@` headers and `context` lines either side. The
  * headers are what make this a patch rather than a listing: `git apply` and
- * `patch` both need them to locate the change, and reject the input outright
- * without them. Runs of unchanged lines between hunks are dropped, which is also
- * what makes the output a reasonable size on a large file.
+ * `patch` both need them to locate the change and reject the input outright
+ * without them. Runs of unchanged lines between hunks are dropped, which also
+ * keeps the output a sane size on a large file.
+ *
+ * Computed from the texts rather than the display rows, and always compared
+ * literally. A patch has to apply, so it cannot inherit `ignoreCase` or
+ * `ignoreWhitespace` from the view — a diff that called two lines equal because
+ * their case differed would produce a patch that does not apply.
  */
-export function toUnified(
-  rows: Row[],
-  leftName = 'left',
-  rightName = 'right',
-  context = 3,
-): string {
+export function toUnified(leftText: string, rightText: string, options: UnifiedOptions = {}): string {
+  const { leftName = 'left', rightName = 'right', context = 3 } = options;
   const header = [`--- ${leftName}`, `+++ ${rightName}`];
 
-  const changed = rows.reduce<number[]>((out, row, i) => {
-    if (row.kind !== 'equal') out.push(i);
+  const changes = diffArrays(patchTokens(leftText), patchTokens(rightText), {
+    timeout: DIFF_TIMEOUT_MS,
+  });
+  if (!changes) return header.join('\n');
+
+  interface Entry {
+    kind: 'equal' | 'added' | 'removed';
+    token: string;
+    leftNo?: number;
+    rightNo?: number;
+  }
+
+  const entries: Entry[] = [];
+  let leftNo = 0;
+  let rightNo = 0;
+  for (const change of changes) {
+    for (const token of change.value) {
+      if (change.added) entries.push({ kind: 'added', token, rightNo: ++rightNo });
+      else if (change.removed) entries.push({ kind: 'removed', token, leftNo: ++leftNo });
+      else entries.push({ kind: 'equal', token, leftNo: ++leftNo, rightNo: ++rightNo });
+    }
+  }
+
+  const changed = entries.reduce<number[]>((out, entry, i) => {
+    if (entry.kind !== 'equal') out.push(i);
     return out;
   }, []);
   // No differences means no hunks. The file headers alone are a valid empty patch.
@@ -322,7 +397,7 @@ export function toUnified(
   const hunks: Array<{ start: number; end: number }> = [];
   for (const i of changed) {
     const start = Math.max(0, i - context);
-    const end = Math.min(rows.length - 1, i + context);
+    const end = Math.min(entries.length - 1, i + context);
     const last = hunks[hunks.length - 1];
     if (last && start <= last.end + 1) last.end = Math.max(last.end, end);
     else hunks.push({ start, end });
@@ -330,9 +405,9 @@ export function toUnified(
 
   const lines = [...header];
   for (const hunk of hunks) {
-    const slice = rows.slice(hunk.start, hunk.end + 1);
-    const fromLeft = slice.filter((r) => r.kind !== 'added');
-    const fromRight = slice.filter((r) => r.kind !== 'removed');
+    const slice = entries.slice(hunk.start, hunk.end + 1);
+    const fromLeft = slice.filter((e) => e.kind !== 'added');
+    const fromRight = slice.filter((e) => e.kind !== 'removed');
 
     // A hunk that adds to an empty side starts at line 0 with a count of 0,
     // which is how unified diff spells "there was nothing here".
@@ -340,9 +415,11 @@ export function toUnified(
     const rightStart = fromRight[0]?.rightNo ?? 0;
 
     lines.push(`@@ -${leftStart},${fromLeft.length} +${rightStart},${fromRight.length} @@`);
-    for (const row of slice) {
-      const prefix = row.kind === 'added' ? '+' : row.kind === 'removed' ? '-' : ' ';
-      lines.push(prefix + row.text);
+    for (const entry of slice) {
+      const prefix = entry.kind === 'added' ? '+' : entry.kind === 'removed' ? '-' : ' ';
+      const terminated = entry.token.endsWith('\n');
+      lines.push(prefix + (terminated ? entry.token.slice(0, -1) : entry.token));
+      if (!terminated) lines.push(NO_EOL);
     }
   }
 

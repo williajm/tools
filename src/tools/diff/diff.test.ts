@@ -7,6 +7,7 @@ import {
   isSkip,
   normalise,
   toSideBySide,
+  patchTokens,
   toUnified,
   wordSegments,
   type Options,
@@ -297,8 +298,7 @@ describe('wordSegments', () => {
 
 describe('toUnified', () => {
   it('emits standard unified-diff prefixes', () => {
-    const { rows } = computeDiff('a\nb', 'a\nc', 'lines', opts());
-    const unified = toUnified(rows, 'old.txt', 'new.txt');
+    const unified = toUnified('a\nb', 'a\nc', { leftName: 'old.txt', rightName: 'new.txt' });
     const lines = unified.split('\n');
     expect(lines[0]).toBe('--- old.txt');
     expect(lines[1]).toBe('+++ new.txt');
@@ -312,26 +312,18 @@ describe('toUnified', () => {
    * as a patch it was rejected by `git apply` and `patch` as corrupt.
    */
   it('emits a hunk header locating the change', () => {
-    const { rows } = computeDiff('a\nb', 'a\nc', 'lines', opts());
-    const lines = toUnified(rows).split('\n');
-    expect(lines[2]).toBe('@@ -1,2 +1,2 @@');
+    expect(toUnified('a\nb', 'a\nc').split('\n')[2]).toBe('@@ -1,2 +1,2 @@');
   });
 
   it('counts each side of the hunk correctly', () => {
     // One line appended: left has 2 lines, right has 3.
-    const { rows } = computeDiff('a\nb\n', 'a\nb\nc\n', 'lines', opts());
-    expect(toUnified(rows)).toContain('@@ -1,2 +1,3 @@');
-  });
-
-  it('spells an addition to an empty side as starting at zero', () => {
-    const { rows } = computeDiff('', 'new line\n', 'lines', opts());
-    expect(toUnified(rows)).toMatch(/@@ -\d+,\d+ \+1,1 @@/);
+    expect(toUnified('a\nb\n', 'a\nb\nc\n')).toContain('@@ -1,2 +1,3 @@');
   });
 
   it('splits distant changes into separate hunks and drops the middle', () => {
     const left = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n');
     const right = left.replace('line 0', 'CHANGED 0').replace('line 39', 'CHANGED 39');
-    const unified = toUnified(computeDiff(left, right, 'lines', opts()).rows);
+    const unified = toUnified(left, right);
     expect(unified.match(/^@@ /gm)).toHaveLength(2);
     // The untouched middle is not carried along.
     expect(unified).not.toContain('line 20');
@@ -340,17 +332,72 @@ describe('toUnified', () => {
   it('merges changes whose context windows touch into one hunk', () => {
     const left = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n');
     const right = left.replace('line 4', 'CHANGED 4').replace('line 6', 'CHANGED 6');
-    const unified = toUnified(computeDiff(left, right, 'lines', opts()).rows);
-    expect(unified.match(/^@@ /gm)).toHaveLength(1);
+    expect(toUnified(left, right).match(/^@@ /gm)).toHaveLength(1);
   });
 
   it('emits headers but no hunks for identical input', () => {
-    const { rows } = computeDiff('same\n', 'same\n', 'lines', opts());
-    expect(toUnified(rows)).toBe('--- left\n+++ right');
+    expect(toUnified('same\n', 'same\n')).toBe('--- left\n+++ right');
   });
 
   it('is newline-terminated', () => {
-    const { rows } = computeDiff('a\n', 'b\n', 'lines', opts());
-    expect(toUnified(rows).endsWith('\n')).toBe(true);
+    expect(toUnified('a\n', 'b\n').endsWith('\n')).toBe(true);
+  });
+
+  /**
+   * Regression: empty text was modelled as one blank line and the trailing-newline
+   * state was discarded, so creating content in an empty file read as replacing a
+   * phantom line, and adding or removing the final newline produced no hunk at all.
+   */
+  describe('empty sides and end-of-file newlines', () => {
+    it('treats an empty side as having no lines', () => {
+      expect(patchTokens('')).toEqual([]);
+      expect(patchTokens('\n')).toEqual(['\n']);
+      expect(patchTokens('a\nb')).toEqual(['a\n', 'b']);
+      expect(patchTokens('a\nb\n')).toEqual(['a\n', 'b\n']);
+    });
+
+    it('spells creating content in an empty file as an insertion at zero', () => {
+      const patch = toUnified('', 'new line\n');
+      expect(patch).toContain('@@ -0,0 +1,1 @@');
+      expect(patch).toContain('+new line');
+      // No phantom blank line to remove.
+      expect(patch).not.toMatch(/^-$/m);
+    });
+
+    it('spells emptying a file as a deletion to zero', () => {
+      const patch = toUnified('gone\n', '');
+      expect(patch).toContain('@@ -1,1 +0,0 @@');
+      expect(patch).toContain('-gone');
+    });
+
+    it('marks a final line with no newline', () => {
+      const patch = toUnified('a\nb\n', 'a\nc');
+      expect(patch).toContain('+c');
+      expect(patch).toContain('\\ No newline at end of file');
+    });
+
+    it('produces a hunk when only the final newline changes', () => {
+      const added = toUnified('a', 'a\n');
+      expect(added).toContain('@@');
+      expect(added).toContain('-a');
+      expect(added).toContain('+a');
+      expect(added).toContain('\\ No newline at end of file');
+
+      const removed = toUnified('a\n', 'a');
+      expect(removed).toContain('@@');
+      expect(removed).toContain('\\ No newline at end of file');
+    });
+
+    it('still reports no hunks when both sides are empty', () => {
+      expect(toUnified('', '')).toBe('--- left\n+++ right');
+    });
+
+    it('compares literally, so a patch is not weakened by the view options', () => {
+      // ignoreCase would call these equal on screen; a patch that dropped the
+      // change would not apply.
+      const patch = toUnified('Alpha\n', 'alpha\n');
+      expect(patch).toContain('-Alpha');
+      expect(patch).toContain('+alpha');
+    });
   });
 });

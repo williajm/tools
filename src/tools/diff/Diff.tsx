@@ -9,6 +9,7 @@ import {
   collapse,
   computeDiff,
   isSkip,
+  normalise,
   toSideBySide,
   toUnified,
   wordSegments,
@@ -119,7 +120,13 @@ export function Diff() {
     });
   }, [visible, state.ignoreCase, state.ignoreWhitespace, state.normaliseEol, state.trimTrailing]);
 
-  const unified = useMemo(() => toUnified(result.rows), [result.rows]);
+  // Built from the normalised texts, not the rows: only the texts still carry
+  // whether a side is empty and whether the last line ended in a newline, and a
+  // patch needs both.
+  const unified = useMemo(
+    () => toUnified(normalise(state.left, state), normalise(state.right, state)),
+    [state.left, state.right, state.normaliseEol, state.trimTrailing],
+  );
 
   const lineMode = state.granularity === 'lines';
 
@@ -184,14 +191,21 @@ export function Diff() {
             />
             Ignore case
           </label>
-          <label class="checkbox">
-            <input
-              type="checkbox"
-              checked={state.ignoreWhitespace}
-              onChange={(e) => set('ignoreWhitespace', (e.target as HTMLInputElement).checked)}
-            />
-            Ignore surrounding whitespace
-          </label>
+          {/*
+            Character mode has no whitespace option to offer: jsdiff's diffChars
+            honours only ignoreCase, so the checkbox previously sat there doing
+            nothing. Word mode treats whitespace runs as insignificant already.
+          */}
+          {state.granularity === 'lines' && (
+            <label class="checkbox">
+              <input
+                type="checkbox"
+                checked={state.ignoreWhitespace}
+                onChange={(e) => set('ignoreWhitespace', (e.target as HTMLInputElement).checked)}
+              />
+              Ignore surrounding whitespace
+            </label>
+          )}
           <label class="checkbox">
             <input
               type="checkbox"
@@ -220,7 +234,13 @@ export function Diff() {
           )}
         </div>
 
-        {result.summary.identical ? (
+        {result.tooLarge ? (
+          <div class="note note--error">
+            <strong>Gave up after 1.5 seconds.</strong> These two inputs are large and differ too
+            much for a diff to finish — the cost grows with how different they are, not just how
+            long they are. Compare smaller sections, or turn on a coarser granularity.
+          </div>
+        ) : result.summary.identical ? (
           <div class="note note--ok">
             ✓ No differences{state.ignoreCase || state.ignoreWhitespace ? ' under these options' : ''}.
           </div>
