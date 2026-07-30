@@ -80,7 +80,7 @@ export const TOOLS: Tool[] = [
     name: 'JSON toolkit',
     blurb: 'Format, minify, validate against a JSON Schema, and diff.',
     category: 'Inspect & validate',
-    keywords: ['pretty', 'beautify', 'minify', 'schema', 'ajv', 'validate', 'parse'],
+    keywords: ['pretty', 'beautify', 'minify', 'schema', 'jsonschema', 'validate', 'parse'],
     offline: true,
   },
   {
@@ -157,6 +157,17 @@ function fuzzyScore(needle: string, haystack: string): number | null {
   return score;
 }
 
+/**
+ * Added to a subsequence score so that every substring hit sorts ahead of every
+ * subsequence hit, whichever field each was found in.
+ *
+ * Without the separation, a scattered match in a high-priority field outranks a
+ * literal one in a lower-priority field: searching "ip" put Timestamp & timezone
+ * (t-**i**-mestam-**p**) above CIDR & subnet, which has "ip" as a keyword.
+ * Comfortably larger than any reachable penalty + position sum.
+ */
+const SUBSEQUENCE_BAND = 1000;
+
 export function searchTools(query: string): Tool[] {
   const q = query.trim().toLowerCase();
   if (!q) return TOOLS;
@@ -174,9 +185,17 @@ export function searchTools(query: string): Tool[] {
     let best: number | null = null;
     for (const [text, penalty] of candidates) {
       // A direct substring hit always beats a scattered subsequence hit.
-      const score = text.includes(q) ? text.indexOf(q) + penalty : fuzzyScore(q, text);
-      if (score === null) continue;
-      const total = score + penalty;
+      let base: number | null;
+      if (text.includes(q)) {
+        base = text.indexOf(q);
+      } else {
+        const fuzzy = fuzzyScore(q, text);
+        base = fuzzy === null ? null : SUBSEQUENCE_BAND + fuzzy;
+      }
+      if (base === null) continue;
+      // The field penalty is applied exactly once. It used to be added to the
+      // substring branch as well as here, which double-charged literal matches.
+      const total = base + penalty;
       if (best === null || total < best) best = total;
     }
     if (best !== null) scored.push({ tool, score: best });
