@@ -178,19 +178,24 @@ export function toConstraints(exclusions: Exclusion[]): Expression[] {
 
 export type Row = Record<string, string>;
 
+/** One combination under test: `strength` parameters each pinned to a value. */
+export type Tuple = ReadonlyArray<{ name: string; value: string }>;
+
 export interface Coverage {
+  /** The strength the tuples were enumerated at, so a reader knows what was checked. */
+  strength: number;
   /** Tuples reachable given the exclusions. */
   total: number;
   covered: number;
   /** Tuples excluded by constraints, so legitimately absent. */
   excluded: number;
-  missing: Array<[string, string, string, string]>;
+  missing: Tuple[];
 }
 
 export interface GenerateResult {
   rows: Row[];
   coverage: Coverage;
-  /** Largest |Vi| × |Vj| — no covering array can have fewer rows than this. */
+  /** Largest product of any `strength` domains — no covering array can be smaller. */
   lowerBound: number;
   error?: string;
 }
@@ -200,53 +205,140 @@ function violatesAny(row: Row, exclusions: Exclusion[]): boolean {
 }
 
 /**
- * Exhaustively verifies pair coverage.
+ * Ceiling on backtracking steps per reachability question.
  *
- * Cheap for realistic inputs (O(rows × params²)) and a total oracle, so there is
- * no reason to trust the generator's output blindly. Any pair that a constraint
- * makes unreachable is reported as excluded rather than missing.
+ * Generous: the search below only ever revisits a parameter when an exclusion
+ * actually bites, so realistic inputs finish in a handful of steps. The budget
+ * exists so a pathological constraint set cannot hang the tab.
+ */
+const REACHABILITY_BUDGET = 100_000;
+
+/**
+ * Whether some complete assignment contains `tuple` and violates no exclusion.
+ *
+ * Checking the tuple against the exclusions alone is not enough. Exclusions
+ * combine: with `A=1, C=1` and `A=1, C=2` forbidden and C having only those two
+ * values, `A=1` cannot appear in any row at all, so every tuple containing it is
+ * unreachable even though no single exclusion names it. Reporting those as gaps
+ * blames the generator for constraints the user wrote.
+ *
+ * A depth-first search over the unpinned parameters settles it. On exhausting the
+ * budget it answers "reachable", which costs a spurious gap in the report rather
+ * than false confidence that nothing is missing.
+ */
+export function isReachable(
+  parameters: Parameter[],
+  tuple: Tuple,
+  exclusions: Exclusion[],
+): boolean {
+  const pinned: Row = {};
+  for (const { name, value } of tuple) pinned[name] = value;
+
+  // A tuple that already breaks an exclusion outright needs no search.
+  if (violatesAny(pinned, exclusions)) return false;
+
+  const free = parameters.filter((p) => !(p.name in pinned));
+  let steps = 0;
+
+  const search = (index: number, assignment: Row): boolean => {
+    if (index === free.length) return true;
+    const parameter = free[index]!;
+    for (const value of parameter.values) {
+      if (++steps > REACHABILITY_BUDGET) return true;
+      const next = { ...assignment, [parameter.name]: value };
+      if (violatesAny(next, exclusions)) continue;
+      if (search(index + 1, next)) return true;
+    }
+    return false;
+  };
+
+  return search(0, pinned);
+}
+
+/** Every combination of `size` distinct parameters, as index lists. */
+function combinations(count: number, size: number): number[][] {
+  const out: number[][] = [];
+  const build = (start: number, chosen: number[]) => {
+    if (chosen.length === size) {
+      out.push([...chosen]);
+      return;
+    }
+    for (let i = start; i < count; i++) {
+      chosen.push(i);
+      build(i + 1, chosen);
+      chosen.pop();
+    }
+  };
+  build(0, []);
+  return out;
+}
+
+/** Cartesian product of the given parameters' value lists. */
+function valueTuples(chosen: Parameter[]): Tuple[] {
+  let out: Tuple[] = [[]];
+  for (const parameter of chosen) {
+    const next: Tuple[] = [];
+    for (const partial of out) {
+      for (const value of parameter.values) {
+        next.push([...partial, { name: parameter.name, value }]);
+      }
+    }
+    out = next;
+  }
+  return out;
+}
+
+/**
+ * Exhaustively verifies coverage at the requested strength.
+ *
+ * A total oracle, so there is no reason to trust the generator's output blindly —
+ * and it verifies what the caller actually asked for. It used to enumerate pairs
+ * regardless of strength, which meant a 3-way matrix was reported as fully
+ * covered on the strength of its pairs alone.
+ *
+ * Any tuple that the constraints make unreachable is reported as excluded rather
+ * than missing.
  */
 export function verifyCoverage(
   parameters: Parameter[],
   rows: Row[],
   exclusions: Exclusion[],
+  strength = 2,
 ): Coverage {
   let total = 0;
   let covered = 0;
   let excluded = 0;
-  const missing: Coverage['missing'] = [];
+  const missing: Tuple[] = [];
 
-  for (let i = 0; i < parameters.length; i++) {
-    for (let j = i + 1; j < parameters.length; j++) {
-      const a = parameters[i]!;
-      const b = parameters[j]!;
-      for (const va of a.values) {
-        for (const vb of b.values) {
-          // A pair forbidden by an exclusion can never appear, so it is not a gap.
-          if (violatesAny({ [a.name]: va, [b.name]: vb }, exclusions)) {
-            excluded++;
-            continue;
-          }
-          total++;
-          const found = rows.some((r) => r[a.name] === va && r[b.name] === vb);
-          if (found) covered++;
-          else missing.push([a.name, va, b.name, vb]);
-        }
+  const width = Math.min(strength, parameters.length);
+
+  for (const indices of combinations(parameters.length, width)) {
+    const chosen = indices.map((i) => parameters[i]!);
+    for (const tuple of valueTuples(chosen)) {
+      if (!isReachable(parameters, tuple, exclusions)) {
+        excluded++;
+        continue;
       }
+      total++;
+      const found = rows.some((row) => tuple.every((t) => row[t.name] === t.value));
+      if (found) covered++;
+      else missing.push(tuple);
     }
   }
 
-  return { total, covered, excluded, missing };
+  return { strength: width, total, covered, excluded, missing };
 }
 
-export function lowerBoundRows(parameters: Parameter[]): number {
-  let bound = 0;
-  for (let i = 0; i < parameters.length; i++) {
-    for (let j = i + 1; j < parameters.length; j++) {
-      bound = Math.max(bound, parameters[i]!.values.length * parameters[j]!.values.length);
-    }
-  }
-  return bound;
+/**
+ * No covering array can have fewer rows than the largest single combination it
+ * has to cover, which is the product of the `strength` largest domains. At
+ * strength 2 that is the familiar max |Vi| × |Vj|.
+ */
+export function lowerBoundRows(parameters: Parameter[], strength = 2): number {
+  const width = Math.min(strength, parameters.length);
+  if (width < 2) return 0;
+  const sizes = parameters.map((p) => p.values.length).sort((a, b) => b - a);
+  return sizes.slice(0, width).reduce((product, size) => product * size, 1);
 }
 
 export function generateMatrix(
@@ -256,7 +348,7 @@ export function generateMatrix(
 ): GenerateResult {
   const empty: GenerateResult = {
     rows: [],
-    coverage: { total: 0, covered: 0, excluded: 0, missing: [] },
+    coverage: { strength, total: 0, covered: 0, excluded: 0, missing: [] },
     lowerBound: 0,
   };
 
@@ -278,14 +370,14 @@ export function generateMatrix(
 
     return {
       rows,
-      coverage: verifyCoverage(parameters, rows, exclusions),
-      lowerBound: lowerBoundRows(parameters),
+      coverage: verifyCoverage(parameters, rows, exclusions, strength),
+      lowerBound: lowerBoundRows(parameters, strength),
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
       ...empty,
-      lowerBound: lowerBoundRows(parameters),
+      lowerBound: lowerBoundRows(parameters, strength),
       error: `Could not build a matrix: ${message}. Contradictory exclusions are the usual cause.`,
     };
   }

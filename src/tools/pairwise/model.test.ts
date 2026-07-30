@@ -3,11 +3,13 @@ import fc from 'fast-check';
 import {
   exportMatrix,
   generateMatrix,
+  isReachable,
   lowerBoundRows,
   parse,
   parseExclusions,
   parseParameters,
   verifyCoverage,
+  type Exclusion,
   type Parameter,
 } from './model.ts';
 
@@ -201,6 +203,120 @@ describe('coverage verification is a real oracle', () => {
       ),
       { numRuns: 40 },
     );
+  });
+
+  /**
+   * Regression: verifyCoverage enumerated pairs whatever the strength, so a
+   * 3-way matrix was declared complete on the strength of its pairs alone, and
+   * the UI labelled that count "3-tuples".
+   */
+  describe('verifies at the strength it was asked for', () => {
+    const params: Parameter[] = [
+      { name: 'A', values: ['1', '2'] },
+      { name: 'B', values: ['1', '2'] },
+      { name: 'C', values: ['1', '2'] },
+      { name: 'D', values: ['1', '2'] },
+    ];
+
+    it('enumerates tuples of the requested width', () => {
+      // C(4,2) × 2² = 24 pairs; C(4,3) × 2³ = 32 triples; C(4,4) × 2⁴ = 16 quads.
+      expect(verifyCoverage(params, [], [], 2).total).toBe(24);
+      expect(verifyCoverage(params, [], [], 3).total).toBe(32);
+      expect(verifyCoverage(params, [], [], 4).total).toBe(16);
+      expect(verifyCoverage(params, [], [], 3).missing[0]).toHaveLength(3);
+    });
+
+    it('reports the strength it actually checked', () => {
+      expect(verifyCoverage(params, [], [], 3).strength).toBe(3);
+      // Capped at the number of parameters rather than silently over-claiming.
+      expect(verifyCoverage(params, [], [], 9).strength).toBe(4);
+    });
+
+    it('catches a pair-complete matrix that misses a triple', () => {
+      const pairComplete = generateMatrix(params, [], 2);
+      expect(pairComplete.coverage.missing).toEqual([]);
+      // The same rows judged at strength 3 must not pass.
+      const asTriples = verifyCoverage(params, pairComplete.rows, [], 3);
+      expect(asTriples.missing.length).toBeGreaterThan(0);
+      expect(asTriples.covered).toBeLessThan(asTriples.total);
+    });
+
+    it('is satisfied by a genuine 3-way matrix', () => {
+      const result = generateMatrix(params, [], 3);
+      expect(result.error).toBeUndefined();
+      expect(result.coverage.strength).toBe(3);
+      expect(result.coverage.missing).toEqual([]);
+    });
+
+    it('scales the lower bound with strength', () => {
+      expect(lowerBoundRows(params, 2)).toBe(4);
+      expect(lowerBoundRows(params, 3)).toBe(8);
+      expect(lowerBoundRows(params, 4)).toBe(16);
+    });
+  });
+
+  /**
+   * Regression: reachability was decided by testing the tuple against each
+   * exclusion in isolation, so a value that several exclusions jointly ruled out
+   * was still counted as reachable and then reported as an uncovered gap —
+   * blaming the generator for the user's own constraints.
+   */
+  describe('reachability accounts for exclusions combining', () => {
+    const params: Parameter[] = [
+      { name: 'A', values: ['1', '2'] },
+      { name: 'B', values: ['1', '2'] },
+      { name: 'C', values: ['1', '2'] },
+    ];
+    // Between them these forbid A=1 outright: C has no third value left.
+    const exclusions: Exclusion[] = [
+      { terms: [{ name: 'A', value: '1' }, { name: 'C', value: '1' }], raw: 'A=1, C=1' },
+      { terms: [{ name: 'A', value: '1' }, { name: 'C', value: '2' }], raw: 'A=1, C=2' },
+    ];
+
+    it('knows a transitively impossible tuple is unreachable', () => {
+      expect(isReachable(params, [{ name: 'A', value: '1' }, { name: 'B', value: '1' }], exclusions))
+        .toBe(false);
+      expect(isReachable(params, [{ name: 'A', value: '2' }, { name: 'B', value: '1' }], exclusions))
+        .toBe(true);
+    });
+
+    it('reports it as excluded rather than missing', () => {
+      const result = generateMatrix(params, exclusions);
+      expect(result.error).toBeUndefined();
+      expect(result.coverage.missing).toEqual([]);
+      expect(result.coverage.covered).toBe(result.coverage.total);
+      // The four A=1 pairs are accounted for, not counted as gaps.
+      expect(result.coverage.excluded).toBeGreaterThanOrEqual(4);
+    });
+
+    it('still calls a directly forbidden pair unreachable', () => {
+      const direct: Exclusion[] = [
+        { terms: [{ name: 'A', value: '1' }, { name: 'B', value: '1' }], raw: 'A=1, B=1' },
+      ];
+      expect(isReachable(params, [{ name: 'A', value: '1' }, { name: 'B', value: '1' }], direct))
+        .toBe(false);
+      // But A=1 on its own is still fine, since B=2 is available.
+      expect(isReachable(params, [{ name: 'A', value: '1' }], direct)).toBe(true);
+    });
+
+    it('terminates on a fully contradictory constraint set', () => {
+      const all: Exclusion[] = [];
+      for (const a of ['1', '2']) {
+        for (const b of ['1', '2']) {
+          for (const c of ['1', '2']) {
+            all.push({
+              terms: [
+                { name: 'A', value: a },
+                { name: 'B', value: b },
+                { name: 'C', value: c },
+              ],
+              raw: '',
+            });
+          }
+        }
+      }
+      expect(isReachable(params, [{ name: 'A', value: '1' }], all)).toBe(false);
+    });
   });
 });
 

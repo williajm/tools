@@ -121,7 +121,7 @@ export function Pairwise() {
                 {result.rows.length} test cases
               </strong>{' '}
               cover {result.coverage.covered} of {result.coverage.total} reachable{' '}
-              {state.strength === 2 ? 'pairs' : `${state.strength}-tuples`}
+              {result.coverage.strength === 2 ? 'pairs' : `${result.coverage.strength}-tuples`}
               {result.coverage.excluded > 0 && ` (${result.coverage.excluded} excluded by constraints)`}.
               {' '}Exhaustive testing would need <strong>{exhaustive.toLocaleString()}</strong> —
               a {(exhaustive / result.rows.length).toFixed(1)}× reduction. Theoretical minimum is{' '}
@@ -133,7 +133,7 @@ export function Pairwise() {
                 <strong>Uncovered:</strong>{' '}
                 {result.coverage.missing
                   .slice(0, 12)
-                  .map(([a, va, b, vb]) => `${a}=${va} & ${b}=${vb}`)
+                  .map((tuple) => tuple.map((t) => `${t.name}=${t.value}`).join(' & '))
                   .join('; ')}
                 {result.coverage.missing.length > 12 && ` … and ${result.coverage.missing.length - 12} more`}
               </div>
