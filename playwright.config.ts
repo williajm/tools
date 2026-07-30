@@ -9,7 +9,11 @@ import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 4173;
 const BASE = process.env.BASE_PATH ?? '/tools/';
-const URL = `http://127.0.0.1:${PORT}${BASE}`;
+// Bind and poll the same literal address. `vite preview` otherwise listens on
+// `localhost`, which resolves to ::1 first on the GitHub runners while this
+// check polls 127.0.0.1 — the server comes up and is never found.
+const HOST = '127.0.0.1';
+const URL = `http://${HOST}:${PORT}${BASE}`;
 
 export default defineConfig({
   testDir: 'tests/e2e',
@@ -24,7 +28,7 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `npm run build && npx vite preview --port ${PORT} --strictPort`,
+    command: `npm run build && npx vite preview --host ${HOST} --port ${PORT} --strictPort`,
     url: URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
