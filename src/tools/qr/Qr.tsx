@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import QRCode from 'qrcode';
 import { ToolShell } from '@shared/components/ToolShell.tsx';
 import { CopyButton } from '@shared/components/CopyButton.tsx';
+import { copyImage } from '@shared/lib/clipboard.ts';
 import { Segmented } from '@shared/components/Segmented.tsx';
 import {
   PAYLOAD_KINDS,
@@ -457,7 +458,16 @@ export function Qr() {
                     dangerouslySetInnerHTML={{ __html: svg }}
                   />
                   <div class="row">
-                    <CopyButton value={svg} label="Copy SVG" />
+                    {/*
+                      The PNG rather than the SVG source: a QR code is wanted as an
+                      image to paste, and SVG markup only helps if the destination
+                      is code. `Download PNG` beside it covers saving to disk.
+                    */}
+                    <CopyButton
+                      value={pngUri}
+                      label="Copy image"
+                      write={() => copyImage(pngUri)}
+                    />
                     <CopyButton value={payload} label="Copy payload" />
                     {pngUri && (
                       <a href={pngUri} download="qr.png">
