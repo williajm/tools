@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The per-tool index.html files are generated from the registry. If a tool
+      # was added without re-running the generator, the committed pages are stale
+      # and the deployed site would be missing a page.
+      - name: Check generated pages match the registry
+        run: |
+          npm run gen:pages
+          # --porcelain rather than `git diff`, so a page for a newly added tool
+          # that was never committed shows up as untracked instead of passing.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Generated pages are out of date. Run 'npm run gen:pages' and commit the result."
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
