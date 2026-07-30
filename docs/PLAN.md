@@ -37,6 +37,30 @@ isolation, which Pages cannot grant. Workarounds exist — `coi-serviceworker`,
 single-threaded builds, SQLite's `opfs-sahpool` VFS — but each carries a real
 trade-off. v1 sidesteps this entirely by staying pure JS.
 
+### The CSP rules out any dependency that generates code
+
+`script-src 'self'` carries no `'unsafe-eval'`, so `eval` and `new Function` both
+throw at runtime. That is deliberate — it is a large part of what makes the
+privacy claim enforceable — but it disqualifies a whole category of library.
+
+This is not theoretical: the JSON toolkit originally used `ajv`, which compiles
+each schema into JavaScript with `new Function`. Schema validation was therefore
+broken on the deployed site for every schema, while every unit test passed,
+because Node has no CSP. It now uses `@cfworker/json-schema`, which walks the
+schema instead of compiling it.
+
+Two rules follow. Prefer an interpreting library over a compiling one — and where
+only a compiling one exists, precompile at build time rather than weakening the
+CSP. And any feature whose dependency might generate code needs an end-to-end
+test that exercises it against the built site, since that is the only place the
+CSP is in force. `tests/e2e/tools.spec.ts` has one for schema validation.
+
+Web Workers are unaffected: `new Worker(new URL('./worker.ts', import.meta.url))`
+loads a real bundled file from the site's own origin, which `'self'` permits. A
+`blob:` worker would not be. The regex tester relies on this to put a time limit
+on a pattern that backtracks catastrophically, which is otherwise impossible —
+a running regex cannot be interrupted, only a thread can be terminated.
+
 ## Architecture
 
 | Decision | Choice | Rationale |
@@ -65,7 +89,7 @@ bookmark folder with extra steps.
 | 2 | **QR code** | Generate + WiFi/vCard/VEVENT/`otpauth:` builders, SVG/PNG export, camera decode | `qrcode`, `jsQR` |
 | 3 | **JWT decoder & verifier** | Decode + signature verification | `jose` |
 | 4 | **Encoding toolkit** | base64 / base64url / URL / HTML entities / hex | native |
-| 5 | **JSON toolkit** | Format, schema validate, query, diff | `ajv`, `jsondiffpatch` |
+| 5 | **JSON toolkit** | Format, schema validate, query, diff | `@cfworker/json-schema`, `jsondiffpatch` |
 | 6 | **Timestamp & timezone** | Unix ↔ ISO8601, timezone conversion | `luxon` |
 | 7 | **UUID / ULID / NanoID** | v4/v7 generation, bulk output | `uuid`, `ulid`, `nanoid` |
 | 8 | **Hash & HMAC** | SHA family via WebCrypto, MD5 via lib | WebCrypto, `js-md5` |

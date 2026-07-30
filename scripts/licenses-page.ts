@@ -13,14 +13,39 @@ import type { Dependency } from 'rollup-plugin-license';
  * carries its own styles and uses only relative links.
  */
 
+const readLicenceText = (name: string): string =>
+  readFileSync(new URL(`./license-texts/${name}.txt`, import.meta.url), 'utf8');
+
 /**
- * Canonical texts for licences that a package may declare without shipping.
+ * Canonical texts for licences whose wording is the same whoever holds the
+ * copyright, so one copy serves any package declaring it.
+ *
  * covertable is exactly that case: its package.json says Apache-2.0 but the npm
  * tarball carries no LICENSE file, and §4(a) requires recipients to be given a
- * copy of the licence. This text is the unmodified upstream one.
+ * copy of the licence. Apache-2.0 names no holder in its body — attribution
+ * lives in a NOTICE file — so the unmodified upstream text is a complete answer.
  */
 const CANONICAL_TEXTS: Record<string, string> = {
-  'Apache-2.0': readFileSync(new URL('./license-texts/Apache-2.0.txt', import.meta.url), 'utf8'),
+  'Apache-2.0': readLicenceText('Apache-2.0'),
+};
+
+/**
+ * Licence texts for specific packages that ship none.
+ *
+ * Needed separately from CANONICAL_TEXTS because the MIT and BSD texts embed
+ * their own copyright line, so there is no such thing as a generic copy: the
+ * clause requiring "the above copyright notice" to be reproduced is only
+ * satisfied by *that* package's notice. Substituting a stock MIT text with
+ * somebody else's name, or none, would be an attribution with a hole in it —
+ * precisely what this page exists to prevent.
+ *
+ * Each entry is the verbatim upstream file, fetched from the project's own
+ * repository, with the source recorded so it can be checked.
+ */
+const PACKAGE_TEXTS: Record<string, string> = {
+  // github.com/cfworker/cfworker/blob/main/LICENSE.md — the npm tarball ships
+  // only README, dist, src and package.json.
+  '@cfworker/json-schema': readLicenceText('cfworker-json-schema'),
 };
 
 const escape = (value: string): string =>
@@ -39,6 +64,39 @@ function repositoryUrl(dependency: Dependency): string | null {
   }
   return homepage;
 }
+
+/**
+ * Only http(s) URLs become links.
+ *
+ * This value is whatever a dependency put in its own package.json, so it is not
+ * trusted input just because it arrived at build time — a `javascript:` URL there
+ * would otherwise be published as a live link on this page. Anything else
+ * (`git@…`, `git+ssh://…`, a bare path) is dropped and the name is shown plain.
+ */
+function linkableUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * This page is written straight to dist and never passes through Vite, so it
+ * needs its own CSP rather than inheriting the one the generator adds to every
+ * other page. It is inert — inline styles, no scripts, no images — so it can be
+ * locked down harder than the tool pages: `default-src 'none'` denies scripts
+ * outright rather than restricting where they may come from.
+ */
+const CSP = [
+  "default-src 'none'",
+  "style-src 'unsafe-inline'",
+  "connect-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+].join('; ');
 
 const STYLES = `
   :root {
@@ -109,7 +167,7 @@ export function licensesPage(dependencies: readonly Dependency[]): string {
     .map((dependency) => {
       const name = dependency.name ?? 'unknown package';
       const id = encodeURIComponent(name);
-      const url = repositoryUrl(dependency);
+      const url = linkableUrl(repositoryUrl(dependency));
       const heading = url
         ? `<a href="${escape(url)}" rel="noopener noreferrer">${escape(name)}</a>`
         : escape(name);
@@ -118,9 +176,13 @@ export function licensesPage(dependencies: readonly Dependency[]): string {
         ? `<p class="meta">NOTICE</p><pre>${escape(dependency.noticeText)}</pre>`
         : '';
 
-      const canonical = dependency.license ? CANONICAL_TEXTS[dependency.license] : undefined;
-      const substituted = !dependency.licenseText && canonical !== undefined;
-      const licenceText = dependency.licenseText ?? canonical;
+      // A text recorded for this exact package wins over a generic one for the
+      // licence, since it carries that project's own copyright notice.
+      const fallback =
+        PACKAGE_TEXTS[name] ??
+        (dependency.license ? CANONICAL_TEXTS[dependency.license] : undefined);
+      const substituted = !dependency.licenseText && fallback !== undefined;
+      const licenceText = dependency.licenseText ?? fallback;
 
       if (licenceText === undefined) {
         // Shipping code whose licence text we cannot produce is exactly the
@@ -128,16 +190,19 @@ export function licensesPage(dependencies: readonly Dependency[]): string {
         // publish an attribution with a hole in it.
         throw new Error(
           `licenses-page: ${name} declares ${dependency.license ?? 'no licence'} but ships no licence ` +
-            'text, and there is no canonical copy for it in scripts/license-texts. Add the text ' +
-            'from the project, or drop the dependency.',
+            'text, and scripts/license-texts has no copy for it. Add the verbatim text from the ' +
+            "project's own repository — as PACKAGE_TEXTS[name] if the licence embeds a copyright " +
+            'line, as CANONICAL_TEXTS[licence] if it does not — or drop the dependency.',
         );
       }
 
+      const provenance =
+        PACKAGE_TEXTS[name] !== undefined
+          ? "this is the verbatim text from the project's own repository"
+          : `this is the canonical ${escape(dependency.license ?? '')} text`;
       const text =
         (substituted
-          ? `<p class="missing">The package ships no licence file; this is the canonical ${escape(
-              dependency.license ?? '',
-            )} text.</p>`
+          ? `<p class="missing">The package ships no licence file; ${provenance}.</p>`
           : '') + `<pre>${escape(licenceText)}</pre>`;
 
       return `      <section class="dep" id="${id}">
@@ -164,6 +229,7 @@ export function licensesPage(dependencies: readonly Dependency[]): string {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
+    <meta http-equiv="Content-Security-Policy" content="${CSP}" />
     <meta name="robots" content="noindex" />
     <title>Licences · tools</title>
     <style>${STYLES}</style>

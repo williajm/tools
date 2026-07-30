@@ -1,3 +1,6 @@
+// Type-only, so the validator stays behind the dynamic import in validateSchema.
+import type { Schema, SchemaDraft } from '@cfworker/json-schema';
+
 /**
  * JSON formatting, validation and diffing.
  *
@@ -165,33 +168,147 @@ export interface ValidationResult {
   error?: string;
 }
 
-/** ajv is loaded on demand — it is the largest dependency on this page. */
+/**
+ * `$schema` values mapped onto the drafts the validator implements. draft-06 is
+ * close enough to draft-07 for the keywords that differ to be ones almost nobody
+ * writes, and answering with draft-07 beats refusing the document.
+ */
+const DRAFTS: ReadonlyArray<readonly [RegExp, SchemaDraft]> = [
+  [/draft-0[34]\//, '4'],
+  [/draft-0[67]\//, '7'],
+  [/draft\/2019-09\//, '2019-09'],
+  [/draft\/2020-12\//, '2020-12'],
+];
+
+const DEFAULT_DRAFT: SchemaDraft = '2020-12';
+
+export function draftOf(schema: unknown): SchemaDraft {
+  const declared =
+    schema !== null && typeof schema === 'object'
+      ? (schema as { $schema?: unknown }).$schema
+      : undefined;
+  if (typeof declared !== 'string') return DEFAULT_DRAFT;
+  for (const [pattern, draft] of DRAFTS) {
+    if (pattern.test(declared)) return draft;
+  }
+  return DEFAULT_DRAFT;
+}
+
+/**
+ * Keywords whose failure only means "something inside me failed". The validator
+ * reports them alongside the specific error underneath, which would show every
+ * violation twice — once uselessly. `anyOf`, `oneOf` and `not` are kept: their
+ * per-branch leaves are the confusing half, and the summary is the useful one.
+ */
+const AGGREGATE_KEYWORDS: ReadonlySet<string> = new Set([
+  'properties',
+  'patternProperties',
+  'additionalProperties',
+  'items',
+  'prefixItems',
+  'additionalItems',
+  'contains',
+  'dependentSchemas',
+  'propertyNames',
+  'allOf',
+  'if',
+  'then',
+  'else',
+  '$ref',
+]);
+
+const JSON_TYPES: ReadonlySet<string> = new Set([
+  'null',
+  'boolean',
+  'object',
+  'array',
+  'number',
+  'string',
+  'integer',
+]);
+
+/**
+ * Catches the schema mistakes the validator would otherwise swallow.
+ *
+ * A misspelled `type` is accepted silently and then fails every instance, so the
+ * document under test gets blamed for a typo in the schema. That is the same
+ * failure mode the CIDR parser guards against: confidently answering a question
+ * nobody asked. A bad `pattern` throws from the validator, so it needs no check.
+ */
+export function checkSchema(schema: unknown, path = '#'): string | null {
+  if (Array.isArray(schema)) {
+    for (const [index, item] of schema.entries()) {
+      const problem = checkSchema(item, `${path}/${index}`);
+      if (problem) return problem;
+    }
+    return null;
+  }
+
+  if (schema === null || typeof schema !== 'object') return null;
+
+  for (const [key, child] of Object.entries(schema as Record<string, unknown>)) {
+    if (key === 'type') {
+      const names = Array.isArray(child) ? child : [child];
+      for (const name of names) {
+        if (typeof name !== 'string') {
+          return `Schema at ${path}: "type" must be a string or an array of strings.`;
+        }
+        if (!JSON_TYPES.has(name)) {
+          return `Schema at ${path}: "${name}" is not a JSON Schema type. Expected one of ${[
+            ...JSON_TYPES,
+          ].join(', ')}.`;
+        }
+      }
+      continue;
+    }
+    // `const` and `enum` hold instance data, not subschemas, so a "type" inside
+    // them is a value rather than a keyword and must not be checked.
+    if (key === 'const' || key === 'enum') continue;
+    const problem = checkSchema(child, `${path}/${key}`);
+    if (problem) return problem;
+  }
+
+  return null;
+}
+
+/**
+ * Validates against a JSON Schema.
+ *
+ * The validator interprets the schema rather than compiling it to JavaScript,
+ * which is not a detail: the pages ship `script-src 'self'`, and every
+ * compiling validator builds its checker with `new Function`. Under this CSP
+ * that throws, so a compiling validator cannot validate anything here at all.
+ * Loaded on demand since only this one mode needs it.
+ */
 export async function validateSchema(value: unknown, schemaText: string): Promise<ValidationResult> {
   const schemaParsed = parseJson(schemaText);
   if (isFailure(schemaParsed)) {
     return { valid: false, issues: [], error: `Schema is not valid JSON: ${schemaParsed.error.message}` };
   }
 
+  const problem = checkSchema(schemaParsed.value);
+  if (problem) return { valid: false, issues: [], error: problem };
+
   try {
-    const [{ default: Ajv }, { default: addFormats }] = await Promise.all([
-      import('ajv'),
-      import('ajv-formats'),
-    ]);
+    const { Validator } = await import('@cfworker/json-schema');
 
-    const ajv = new Ajv({ allErrors: true, strict: false });
-    addFormats(ajv);
-
-    const validate = ajv.compile(schemaParsed.value as object);
-    const valid = validate(value);
+    // shortCircuit false, so every violation is reported rather than the first.
+    const validator = new Validator(
+      schemaParsed.value as Schema,
+      draftOf(schemaParsed.value),
+      false,
+    );
+    const result = validator.validate(value);
 
     return {
-      valid: Boolean(valid),
-      issues: (validate.errors ?? []).map((e) => ({
-        path: e.instancePath || '(root)',
-        message: `${e.message ?? 'is invalid'}${
-          e.params && Object.keys(e.params).length ? ` — ${JSON.stringify(e.params)}` : ''
-        }`,
-      })),
+      valid: result.valid,
+      issues: [...result.errors]
+        .filter((e) => !AGGREGATE_KEYWORDS.has(e.keyword))
+        .map((e) => ({
+          // Locations arrive as JSON pointers prefixed with '#'.
+          path: e.instanceLocation.replace(/^#/, '') || '(root)',
+          message: e.error,
+        })),
     };
   } catch (err) {
     return {

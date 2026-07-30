@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   analyse,
+  checkSchema,
   diffJson,
+  draftOf,
   format,
   isFailure,
   minify,
@@ -211,5 +213,87 @@ describe('validateSchema', () => {
     const result = await validateSchema({}, '{"type": "notatype"}');
     expect(result.valid).toBe(false);
     expect(result.error).toBeTruthy();
+  });
+
+  it('reports a bad pattern in the schema as a schema error', async () => {
+    const result = await validateSchema('x', '{"type":"string","pattern":"([unclosed"}');
+    expect(result.valid).toBe(false);
+    expect(result.error).toBeTruthy();
+    expect(result.issues).toEqual([]);
+  });
+
+  // The validator reports both the container keyword and the specific failure
+  // underneath it; showing both would list every violation twice.
+  it('does not report a violation twice via its container keyword', async () => {
+    const result = await validateSchema(
+      { age: 'old' },
+      JSON.stringify({ type: 'object', properties: { age: { type: 'integer' } } }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0]!.path).toBe('/age');
+  });
+
+  it('names the root when the failure is the document itself', async () => {
+    const result = await validateSchema([], '{"type":"object"}');
+    expect(result.valid).toBe(false);
+    expect(result.issues[0]!.path).toBe('(root)');
+  });
+
+  it('honours a declared draft', async () => {
+    // `exclusiveMinimum` is a boolean modifier in draft-04 and a number from
+    // draft-06 on, so the draft chosen changes the verdict for the same document.
+    const schema = JSON.stringify({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'integer',
+      exclusiveMinimum: 5,
+    });
+    expect((await validateSchema(5, schema)).valid).toBe(false);
+    expect((await validateSchema(6, schema)).valid).toBe(true);
+  });
+});
+
+describe('draftOf', () => {
+  it('reads the declared $schema', () => {
+    expect(draftOf({ $schema: 'http://json-schema.org/draft-04/schema#' })).toBe('4');
+    expect(draftOf({ $schema: 'http://json-schema.org/draft-07/schema#' })).toBe('7');
+    expect(draftOf({ $schema: 'https://json-schema.org/draft/2019-09/schema' })).toBe('2019-09');
+    expect(draftOf({ $schema: 'https://json-schema.org/draft/2020-12/schema' })).toBe('2020-12');
+  });
+
+  it('maps draft-06 onto draft-07 rather than refusing it', () => {
+    expect(draftOf({ $schema: 'http://json-schema.org/draft-06/schema#' })).toBe('7');
+  });
+
+  it('falls back to the current draft when none is declared', () => {
+    expect(draftOf({ type: 'object' })).toBe('2020-12');
+    expect(draftOf({ $schema: 42 })).toBe('2020-12');
+    expect(draftOf(null)).toBe('2020-12');
+  });
+});
+
+describe('checkSchema', () => {
+  it('passes a well-formed schema', () => {
+    expect(checkSchema({ type: 'object', properties: { a: { type: ['string', 'null'] } } })).toBeNull();
+  });
+
+  it('catches a misspelled type, which the validator would otherwise swallow', () => {
+    expect(checkSchema({ type: 'sting' })).toMatch(/not a JSON Schema type/);
+  });
+
+  it('catches a misspelled type nested in a subschema', () => {
+    const problem = checkSchema({ properties: { a: { items: { type: 'boolen' } } } });
+    expect(problem).toMatch(/#\/properties\/a\/items/);
+  });
+
+  it('catches a non-string type', () => {
+    expect(checkSchema({ type: 7 })).toMatch(/must be a string/);
+  });
+
+  // `const` and `enum` hold instance data, so a "type" key inside them is a
+  // value the user is matching on rather than a keyword to validate.
+  it('does not mistake instance data for a keyword', () => {
+    expect(checkSchema({ const: { type: 'whatever the user likes' } })).toBeNull();
+    expect(checkSchema({ enum: [{ type: 'anything' }] })).toBeNull();
   });
 });
