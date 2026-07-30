@@ -1,5 +1,7 @@
 # tools
 
+**Live site: [williajm.github.io/tools](https://williajm.github.io/tools/)**
+
 Developer and test utilities that run entirely in your browser. No server, no
 upload, no account — the site is static files on GitHub Pages, and your data
 never leaves the machine.
