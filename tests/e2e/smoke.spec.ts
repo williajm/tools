@@ -64,3 +64,14 @@ test('every page forbids network connections in its own CSP', async ({ page }) =
     expect(csp, path).toContain("default-src 'self'");
   }
 });
+
+test('the licences page carries a CSP too', async ({ page }) => {
+  // It is written straight to dist without passing through Vite, so it does not
+  // inherit the CSP the page generator adds and has to set its own.
+  await page.goto('./licenses/');
+  const csp = await page
+    .locator('meta[http-equiv="Content-Security-Policy"]')
+    .getAttribute('content');
+  expect(csp).toContain("connect-src 'none'");
+  expect(csp).toContain("default-src 'none'");
+});

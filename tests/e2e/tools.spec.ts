@@ -61,3 +61,82 @@ test('the CIDR ruler shows where the network stops', async ({ page }) => {
   await expect(page.locator('.ruler__cell--network')).toHaveCount(12);
   await expect(page.locator('.ruler__cell--host')).toHaveCount(20);
 });
+
+/**
+ * These exercise a feature rather than a page load, because that is the gap the
+ * load-only smoke pass leaves. Schema validation was completely broken in the
+ * built site — the validator compiled its checker with `new Function`, which
+ * `script-src 'self'` forbids — while the unit tests passed, because Node has no
+ * CSP. Only driving the real page under the real CSP catches that class of bug.
+ */
+test('JSON Schema validation runs under the shipped CSP', async ({ page }) => {
+  const problems: string[] = [];
+  page.on('pageerror', (error) => problems.push(`uncaught: ${error.message}`));
+  page.on('console', (message) => {
+    if (message.type() === 'error') problems.push(`console: ${message.text()}`);
+  });
+
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Schema' }).click();
+  await page.getByLabel('JSON', { exact: true }).fill('{"name": "Ada", "age": 36}');
+  await page.getByLabel('JSON Schema').fill('{"type":"object","required":["name","age"]}');
+
+  await expect(page.getByText('Valid against the schema')).toBeVisible();
+  // No 'unsafe-eval' complaint, and nothing else, on the way to that verdict.
+  expect(problems).toEqual([]);
+});
+
+test('JSON Schema validation reports a real violation with its path', async ({ page }) => {
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Schema' }).click();
+  await page.getByLabel('JSON', { exact: true }).fill('{"age": "old"}');
+  await page
+    .getByLabel('JSON Schema')
+    .fill('{"type":"object","required":["name"],"properties":{"age":{"type":"integer"}}}');
+
+  await expect(page.getByText(/violation/)).toBeVisible();
+  await expect(page.locator('body')).toContainText('/age');
+});
+
+/**
+ * Regression: a NumericDate outside the range Date can represent threw
+ * RangeError out of the claims table while rendering, which blanked the entire
+ * tool — no output, no error, just the token box.
+ */
+test('the JWT tool survives a token with an absurd exp', async ({ page }) => {
+  const problems: string[] = [];
+  page.on('pageerror', (error) => problems.push(`uncaught: ${error.message}`));
+
+  const b64u = (value: unknown) =>
+    Buffer.from(JSON.stringify(value)).toString('base64url');
+  const token = `${b64u({ alg: 'HS256', typ: 'JWT' })}.${b64u({ sub: 'x', exp: -1e13 })}.sig`;
+
+  await page.goto('./jwt/');
+  await page.getByLabel('Token').fill(token);
+
+  // The payload still renders, and the bad claim is explained rather than fatal.
+  await expect(page.getByText('"sub": "x"')).toBeVisible();
+  await expect(page.getByRole('row', { name: /exp/ })).toContainText('range of dates');
+  expect(problems).toEqual([]);
+});
+
+test('a catastrophic regex is abandoned instead of freezing the page', async ({ page }) => {
+  await page.goto('./regex/');
+  await page.getByLabel('Pattern').fill('(a+)+$');
+  await page.getByLabel('Test string').fill(`${'a'.repeat(40)}b`);
+
+  // Evaluated on a worker, so it can be terminated. Allow for the 2s budget.
+  await expect(page.getByText(/Gave up after/)).toBeVisible({ timeout: 15_000 });
+  // The page is still alive and responsive afterwards.
+  await page.getByLabel('Pattern').fill('\\d+');
+  await page.getByLabel('Test string').fill('a1b22');
+  await expect(page.getByText('2 matches')).toBeVisible();
+});
+
+test('the pairwise matrix verifies at the strength selected', async ({ page }) => {
+  await page.goto('./pairwise/');
+  await page.getByRole('button', { name: '3-way' }).click();
+  // The readout must name what was actually checked, not just echo the control.
+  await expect(page.getByText(/reachable 3-tuples/)).toBeVisible();
+  await expect(page.getByText(/Uncovered/)).toBeHidden();
+});
