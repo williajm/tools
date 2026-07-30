@@ -1,0 +1,19 @@
+version: 2
+
+# Scoped deliberately to GitHub Actions only.
+#
+# npm is left to Dependabot's security updates, which raise a PR for an advisory
+# and nothing else — routine version churn on a static site is noise. Actions are
+# different: they are pinned to commit SHAs for supply-chain safety, and a SHA
+# carries no semver, so nothing would ever tell us a pin had gone stale. This is
+# what keeps those pins moving.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci
