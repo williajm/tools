@@ -1,9 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
-import { CommandPalette } from './CommandPalette.tsx';
 import { Wordmark } from './Wordmark.tsx';
 import { homeUrl } from '../lib/paths.ts';
-import { recordRecent } from '../lib/recents.ts';
 import { toolBySlug } from '../registry.ts';
 
 interface Props {
@@ -13,15 +11,12 @@ interface Props {
   children: ComponentChildren;
 }
 
-/** Common chrome for every tool page: topbar, heading from the registry, footer, palette. */
+/** Common chrome for every tool page: topbar, heading from the registry, footer. */
 export function ToolShell({ slug, wide, children }: Props) {
   const tool = toolBySlug(slug);
 
   useEffect(() => {
-    if (tool) {
-      document.title = `${tool.name} · tools`;
-      recordRecent(slug);
-    }
+    if (tool) document.title = `${tool.name} · tools`;
   }, [slug, tool]);
 
   return (
@@ -31,10 +26,6 @@ export function ToolShell({ slug, wide, children }: Props) {
           <Wordmark />
           tools
         </a>
-        <span class="topbar__spacer" />
-        <span class="topbar__hint">
-          <kbd>Ctrl</kbd> <kbd>K</kbd>
-        </span>
       </header>
 
       {tool && (
@@ -51,8 +42,6 @@ export function ToolShell({ slug, wide, children }: Props) {
         <a href={`${homeUrl()}licenses/`}>Licences</a>
         <a href="https://github.com/williajm/tools">Source</a>
       </footer>
-
-      <CommandPalette />
     </div>
   );
 }

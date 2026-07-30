@@ -1,39 +1,11 @@
-import { test, expect, type Page } from '@playwright/test';
-
-/** The information architecture: search, the Ctrl-K palette, and recents. */
+import { test, expect } from '@playwright/test';
+import { CATEGORIES, TOOLS } from '../../src/shared/registry.ts';
 
 /**
- * Opens the command palette.
- *
- * `goto` resolves as soon as the document loads, which on a client-rendered
- * page is before the effect that binds the Ctrl-K listener has run — a keypress
- * sent in that gap is simply lost. Waiting for the rendered shell covers the
- * usual case, and retrying covers the rest.
+ * The information architecture, which is now just the card grid: no search box,
+ * no command palette, no recents. That makes the grid the only route to a tool,
+ * so these check every tool is actually reachable from it.
  */
-async function openPalette(page: Page) {
-  await expect(page.locator('footer.foot')).toBeVisible();
-  const palette = page.getByRole('dialog', { name: 'Find a tool' });
-  await expect(async () => {
-    await page.keyboard.press('Control+k');
-    await expect(palette).toBeVisible({ timeout: 1000 });
-  }).toPass({ timeout: 10_000 });
-  return palette;
-}
-
-test('search narrows the index', async ({ page }) => {
-  await page.goto('./');
-  await page.getByLabel('Search tools').fill('b64');
-
-  // Subsequence matching, so "b64" should still find Base64 encoding.
-  await expect(page.locator('.card__name').first()).toHaveText('Encoding');
-  await expect(page.locator('.card')).not.toHaveCount(13);
-});
-
-test('search says so when nothing matches', async ({ page }) => {
-  await page.goto('./');
-  await page.getByLabel('Search tools').fill('zzzzqqq');
-  await expect(page.getByText('No tool matches')).toBeVisible();
-});
 
 test('a card navigates to its tool', async ({ page }) => {
   await page.goto('./');
@@ -42,31 +14,46 @@ test('a card navigates to its tool', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Pairwise matrix');
 });
 
-test('Ctrl-K reaches another tool from a tool page', async ({ page }) => {
-  await page.goto('./encoding/');
-  const palette = await openPalette(page);
-
-  await palette.getByLabel('Find a tool').fill('cidr');
-  await expect(palette.getByRole('option').first()).toContainText('CIDR');
-
-  await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\/cidr\/$/);
+test('every tool has a card on the home page', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('.card')).toHaveCount(TOOLS.length);
+  for (const tool of TOOLS) {
+    await expect(page.locator('.card__name').filter({ hasText: tool.name }).first()).toBeVisible();
+  }
 });
 
-test('Escape closes the palette', async ({ page }) => {
-  await page.goto('./encoding/');
-  const palette = await openPalette(page);
-  await page.keyboard.press('Escape');
-  await expect(palette).toBeHidden();
+test('the cards are grouped under every category in registry order', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('.cat-head')).toHaveText([...CATEGORIES]);
 });
 
-test('a visited tool appears under Recent', async ({ page }) => {
+test('the removed navigation is gone', async ({ page }) => {
+  // Asserted rather than assumed: a stale bundle would still carry these.
+  for (const path of ['./', './encoding/']) {
+    await page.goto(path);
+    await expect(page.locator('footer.foot')).toBeVisible();
+    await expect(page.getByLabel('Search tools')).toHaveCount(0);
+    await expect(page.locator('.topbar__hint')).toHaveCount(0);
+
+    // Ctrl-K must do nothing at all now.
+    await page.keyboard.press('Control+k');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  }
+});
+
+test('visiting a tool records nothing in localStorage', async ({ page }) => {
+  // Recents was the only thing that wrote there; the site should now store
+  // nothing on the machine at all.
   await page.goto('./hash/');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Hash & HMAC');
 
-  await page.goto('./');
-  const recent = page.locator('.cat-head', { hasText: 'Recent' });
-  await expect(recent).toBeVisible();
-  // The Recent grid is the one immediately after that heading.
-  await expect(recent.locator('+ .card-grid .card__name')).toHaveText(['Hash & HMAC']);
+  const stored = await page.evaluate(() =>
+    Object.fromEntries(
+      Array.from({ length: localStorage.length }, (_, i) => {
+        const key = localStorage.key(i)!;
+        return [key, localStorage.getItem(key)];
+      }),
+    ),
+  );
+  expect(stored).toEqual({});
 });
