@@ -17,7 +17,9 @@ and HMAC, timestamps and timezones, lorem and test data, QR codes, JWT, a JSON
 toolkit, text diff, CIDR and subnets, a regex tester, XPath and CSS selectors,
 and a pairwise test matrix generator.
 
-`Ctrl-K` opens the command palette from anywhere.
+The home page lists all of them, grouped by category. That grid is the whole
+navigation — there is no search box, no command palette and no recents list, so
+the site stores nothing on your machine.
 
 ## Development
 

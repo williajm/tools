@@ -77,9 +77,15 @@ Note that roughly half the tools need no framework at all. Standardising on Prea
 anyway — consistency across a shared design system beats micro-optimising each page.
 
 **Information architecture is a Phase 0 concern, not a polish item.** Thirteen-plus
-tools with a flat list is unusable. Categories, fuzzy search, a `Ctrl-K` command
-palette, and recents in `localStorage` are what separate a daily-use site from a
-bookmark folder with extra steps.
+tools with a flat list is unusable, so the index is grouped by category.
+
+Revised after v1: the fuzzy search, the `Ctrl-K` command palette and the
+`localStorage` recents list were all built and then removed. Thirteen tools fit on
+one screen, so the category grid was doing the work on its own and the rest was a
+ranking engine, a modal and a storage dependency serving a problem the site does
+not have. Removing them also means nothing is written to the machine at all, which
+suits the privacy claim better than recents ever did. Revisit if the tool count
+grows past what one screen can hold.
 
 ## Tools
 
@@ -171,8 +177,8 @@ in place before the first public deploy.
 ## Phasing
 
 **Phase 0 — skeleton.** Vite + TS + Preact, design system, Actions deploy pipeline,
-IA (categories, search, `Ctrl-K` palette), licence attribution generation, and 2–3
-trivial tools end-to-end to prove the loop.
+IA (categories; search and the `Ctrl-K` palette were later removed — see above),
+licence attribution generation, and 2–3 trivial tools end-to-end to prove the loop.
 
 **Phase 1 — the easy wins.** #4 Encoding, #7 UUID, #8 Hash, #6 Timestamp. Small,
 high-use, no interesting dependencies.
@@ -185,7 +191,8 @@ the strongest privacy story and the reason to visit.
 
 **Phase 4 — polish.** PWA offline, per-tool CSP lockdown, share-links, recents.
 
-Per-tool CSP, share-links and recents are done. PWA offline is blocked — see below.
+Per-tool CSP and share-links are done. Recents was built and then removed with the
+rest of the search IA. PWA offline is blocked — see below.
 
 ## Deferred
 
