@@ -547,6 +547,15 @@ function Decoder() {
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: 'environment' } })
       .then((s) => {
+        // Stopped while the permission prompt was up or the camera was warming
+        // up. Cleanup already ran and saw `stream` still null, so it stopped
+        // nothing — this is the only remaining reference to these tracks, and
+        // dropping it would leave the camera on with its indicator lit and no
+        // way to reach it short of a page reload.
+        if (stopped) {
+          s.getTracks().forEach((t) => t.stop());
+          return;
+        }
         stream = s;
         if (videoRef.current) {
           videoRef.current.srcObject = s;
@@ -555,6 +564,9 @@ function Decoder() {
       })
       .then(() => void tick())
       .catch((err: unknown) => {
+        // A failure belonging to a run the user already stopped is not news, and
+        // reporting it would overwrite whatever the current run is doing.
+        if (stopped) return;
         setScanning(false);
         setError(
           err instanceof Error

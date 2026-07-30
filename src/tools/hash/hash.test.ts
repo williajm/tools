@@ -78,3 +78,31 @@ describe('compute', () => {
     }
   });
 });
+
+/**
+ * Regression: HMAC-vs-digest was chosen by the key's truthiness, so enabling
+ * HMAC with a blank key fell through to a plain digest — which the UI labelled
+ * `HMAC-*`. An unkeyed digest presented as a MAC is unusable as authentication
+ * and gives no sign of it.
+ */
+describe('HMAC intent is explicit, not inferred', () => {
+  it('refuses an empty key rather than silently returning a digest', async () => {
+    await expect(compute('msg', 'SHA-256', '')).rejects.toThrow(/Enter a key/);
+  });
+
+  it('never returns the plain digest for any keyed request', async () => {
+    const plain = await compute('msg', 'SHA-256', null);
+    await expect(compute('msg', 'SHA-256', '')).rejects.toThrow();
+    expect(await compute('msg', 'SHA-256', 'k')).not.toBe(plain);
+  });
+
+  it('still treats null as an unkeyed digest', async () => {
+    expect(await compute('msg', 'SHA-256', null)).toBe(await digest('msg', 'SHA-256'));
+  });
+
+  it('reports the empty key for every non-MD5 algorithm', async () => {
+    for (const algorithm of ALGORITHMS.filter((a) => a !== 'MD5')) {
+      await expect(compute('m', algorithm, '')).rejects.toThrow(/Enter a key/);
+    }
+  });
+});

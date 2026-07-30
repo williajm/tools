@@ -138,7 +138,10 @@ export function buildGeo(lat: string, lon: string): string {
 export function buildTotp(f: TotpFields): string {
   const label = f.issuer ? `${f.issuer}:${f.account}` : f.account;
   const params = new URLSearchParams({
-    secret: f.secret.replace(/[\s=]/g, '').toUpperCase(),
+    // Falls back to the secret as typed when the padding is misplaced, so the
+    // code carries what the user entered rather than a key nobody asked for.
+    // `validateBase32` is what tells them about it.
+    secret: normaliseBase32(f.secret) ?? f.secret.replace(/\s+/g, '').toUpperCase(),
     algorithm: f.algorithm,
     digits: String(f.digits),
     period: String(f.period),
@@ -149,9 +152,27 @@ export function buildTotp(f: TotpFields): string {
 
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
+/**
+ * Strips whitespace and legal trailing padding from a base32 secret.
+ *
+ * Padding only ever appears at the end of base32. Removing `=` wherever it
+ * appeared meant `JBSW=Y3DP` was accepted and encoded as `JBSWY3DP` — a
+ * different key, so an authenticator provisioned from the QR code would never
+ * agree with the server, with nothing on screen to suggest why. Returns null
+ * when a `=` sits anywhere else.
+ */
+export function normaliseBase32(secret: string): string | null {
+  const compact = secret.replace(/\s+/g, '').toUpperCase();
+  const body = compact.replace(/=+$/, '');
+  return body.includes('=') ? null : body;
+}
+
 /** Validates a base32 TOTP secret, since a bad one fails silently in the app. */
 export function validateBase32(secret: string): string | null {
-  const cleaned = secret.replace(/[\s=]/g, '').toUpperCase();
+  const cleaned = normaliseBase32(secret);
+  if (cleaned === null) {
+    return 'Base32 padding (“=”) may only appear at the end of the secret.';
+  }
   if (!cleaned) return 'Secret is required.';
   for (const ch of cleaned) {
     if (!BASE32.includes(ch)) {

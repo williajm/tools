@@ -31,6 +31,11 @@ export async function hmac(text: string, key: string, algorithm: Algorithm): Pro
   if (algorithm === 'MD5') {
     throw new Error('HMAC-MD5 is not available. Pick SHA-256 or stronger.');
   }
+  if (key === '') {
+    // WebCrypto rejects a zero-length key ("Zero-length key is not supported"),
+    // so say what to do about it rather than surfacing that.
+    throw new Error('Enter a key to compute an HMAC.');
+  }
   const enc = new TextEncoder();
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
@@ -42,10 +47,20 @@ export async function hmac(text: string, key: string, algorithm: Algorithm): Pro
   return toHex(await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(text)));
 }
 
+/**
+ * Digest, or HMAC when a key is supplied.
+ *
+ * `null` means "no HMAC"; a string means HMAC, including the empty string, which
+ * errors. The distinction has to be explicit rather than read off the key's
+ * truthiness: doing the latter meant that turning HMAC on and leaving the key
+ * blank fell through to a plain digest, which the UI then labelled `HMAC-*`.
+ * Handing back an unkeyed digest labelled as a MAC is the worst answer available,
+ * so the two cases are now impossible to confuse.
+ */
 export async function compute(
   text: string,
   algorithm: Algorithm,
   key: string | null,
 ): Promise<string> {
-  return key ? hmac(text, key, algorithm) : digest(text, algorithm);
+  return key === null ? digest(text, algorithm) : hmac(text, key, algorithm);
 }

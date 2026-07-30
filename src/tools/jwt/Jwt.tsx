@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ToolShell } from '@shared/components/ToolShell.tsx';
 import { CopyButton } from '@shared/components/CopyButton.tsx';
 import { Segmented } from '@shared/components/Segmented.tsx';
@@ -70,15 +70,35 @@ export function Jwt() {
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [verifying, setVerifying] = useState(false);
 
-  // Clear a stale verdict whenever the inputs change.
-  useEffect(() => setResult(null), [token, keyInput, keyFormat]);
+  /**
+   * Identifies the verification a result belongs to.
+   *
+   * Verification is async and the inputs stay editable while it runs, so a
+   * result has to be tied to the inputs it was computed from. Committing it
+   * unconditionally meant editing the token mid-flight left "Signature is
+   * valid" sitting under a token that was never verified — the one claim this
+   * tool exists to make, made about the wrong thing.
+   */
+  const runId = useRef(0);
+
+  // Any edit invalidates both the displayed verdict and anything still in
+  // flight, so a late result cannot land against inputs it never saw.
+  useEffect(() => {
+    runId.current++;
+    setResult(null);
+    setVerifying(false);
+  }, [token, keyInput, keyFormat]);
 
   const runVerify = async () => {
+    const id = ++runId.current;
     setVerifying(true);
     try {
-      setResult(await verify(token, keyInput, keyFormat));
+      const outcome = await verify(token, keyInput, keyFormat);
+      if (runId.current === id) setResult(outcome);
     } finally {
-      setVerifying(false);
+      // Left alone when superseded: the edit that superseded this run already
+      // cleared the flag, and clobbering it here would wedge the button.
+      if (runId.current === id) setVerifying(false);
     }
   };
 

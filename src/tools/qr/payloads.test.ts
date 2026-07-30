@@ -1,15 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  buildEmail,
-  buildEvent,
-  buildGeo,
-  buildSms,
-  buildTotp,
-  buildVcard,
-  buildWifi,
-  randomBase32Secret,
-  validateBase32,
-} from './payloads.ts';
+import { buildEmail, buildEvent, buildGeo, buildSms, buildTotp, buildVcard, buildWifi, normaliseBase32, randomBase32Secret, validateBase32 } from './payloads.ts';
 
 describe('buildWifi', () => {
   it('produces the canonical WIFI: string', () => {
@@ -181,5 +171,42 @@ describe('randomBase32Secret', () => {
   it('does not repeat', () => {
     const seen = new Set(Array.from({ length: 50 }, () => randomBase32Secret()));
     expect(seen.size).toBe(50);
+  });
+});
+
+/**
+ * Regression: `=` was stripped wherever it appeared, so a secret with interior
+ * padding was accepted and encoded as a different key — an authenticator
+ * provisioned from the code would never match the server.
+ */
+describe('base32 padding placement', () => {
+  it('accepts legal trailing padding', () => {
+    expect(normaliseBase32('JBSWY3DPEHPK3PXP')).toBe('JBSWY3DPEHPK3PXP');
+    expect(normaliseBase32('JBSWY3DPEHPK3PX=')).toBe('JBSWY3DPEHPK3PX');
+    expect(normaliseBase32('JBSWY3DP======')).toBe('JBSWY3DP');
+  });
+
+  it('rejects padding anywhere else', () => {
+    expect(normaliseBase32('JBSW=Y3DP')).toBeNull();
+    expect(normaliseBase32('=JBSWY3DP')).toBeNull();
+    expect(normaliseBase32('JB=SW==Y3DP===')).toBeNull();
+  });
+
+  it('normalises whitespace and case as before', () => {
+    expect(normaliseBase32(' jbswy3dp ehpk3pxp ')).toBe('JBSWY3DPEHPK3PXP');
+  });
+
+  it('reports misplaced padding rather than silently repairing it', () => {
+    expect(validateBase32('JBSW=Y3DPEHPK3PXP')).toMatch(/only appear at the end/);
+  });
+
+  it('never encodes a key the user did not type', () => {
+    const url = buildTotp({
+      issuer: 'i', account: 'a', secret: 'JBSW=Y3DPEHPK3PXP',
+      digits: 6, period: 30, algorithm: 'SHA1',
+    } as never);
+    const encoded = new URL(url).searchParams.get('secret');
+    // Must not have become the shorter, different key JBSWY3DPEHPK3PXP.
+    expect(encoded).toBe('JBSW=Y3DPEHPK3PXP');
   });
 });
