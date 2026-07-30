@@ -161,7 +161,20 @@ the strongest privacy story and the reason to visit.
 
 **Phase 4 — polish.** PWA offline, per-tool CSP lockdown, share-links, recents.
 
+Per-tool CSP, share-links and recents are done. PWA offline is blocked — see below.
+
 ## Deferred
+
+TODO: PWA offline (`vite-plugin-pwa`). Blocked on a supply-chain problem, not a
+technical one. Every version of the plugin pulls `workbox-build`, which reaches
+`brace-expansion` — vulnerable at `<=5.0.7` under GHSA-mh99-v99m-4gvg (high, DoS
+by unbounded expansion, build-time only). The fix is `brace-expansion@5.0.8`, and
+an `overrides` pin would resolve it cleanly, but that release is newer than the
+7-day minimum-release-age policy this environment installs under, so the lockfile
+cannot be generated for it. Revisit once 5.0.8 ages in: add `vite-plugin-pwa`
+plus `"overrides": { "brace-expansion": "^5.0.8" }` and confirm `npm audit` stays
+clean. Note when doing so that the faker chunk is 2.8 MB — precache the rest and
+cache that one at runtime rather than forcing it on every first visit.
 
 TODO: multi-flavour regex (PCRE/RE2) — needs WASM, revisit once the COI question
 is settled.
