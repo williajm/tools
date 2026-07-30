@@ -18,8 +18,11 @@ toolkit, text diff, CIDR and subnets, a regex tester, XPath and CSS selectors,
 and a pairwise test matrix generator.
 
 The home page lists all of them, grouped by category. That grid is the whole
-navigation — there is no search box, no command palette and no recents list, so
-the site stores nothing on your machine.
+navigation — there is no search box, no command palette and no recents list.
+
+Light and dark both work. The toggle in the header cycles system, light and dark;
+"system" is the default and stores nothing, so the site only writes to your
+machine if you actively pick a side.
 
 ## Development
 

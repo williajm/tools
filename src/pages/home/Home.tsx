@@ -1,5 +1,6 @@
 import { CATEGORIES, TOOLS } from '@shared/registry.ts';
 import { toolUrl } from '@shared/lib/paths.ts';
+import { ThemeToggle } from '@shared/components/ThemeToggle.tsx';
 import { Wordmark } from '@shared/components/Wordmark.tsx';
 
 function ToolCard({ slug, name, blurb }: { slug: string; name: string; blurb: string }) {
@@ -15,8 +16,7 @@ function ToolCard({ slug, name, blurb }: { slug: string; name: string; blurb: st
  * The index: every tool, grouped by category.
  *
  * Thirteen tools fit on one screen, so the grid is the whole navigation — there
- * is no search box, no command palette and no recents list. Nothing here holds
- * state, which is also why the page no longer touches localStorage at all.
+ * is no search box, no command palette and no recents list.
  */
 export function Home() {
   return (
@@ -26,6 +26,7 @@ export function Home() {
           <Wordmark />
           tools
         </span>
+        <ThemeToggle />
       </header>
 
       <div class="hero">

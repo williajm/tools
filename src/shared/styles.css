@@ -48,6 +48,14 @@
   }
 }
 
+/*
+   Scrollbars, form controls and the canvas the browser paints before CSS lands are
+   driven by `color-scheme`, not by our custom properties. Without these, forcing
+   light on a dark-mode machine left dark scrollbars framing a light page.
+*/
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }
+
 :root[data-theme='dark'] {
   --bg:        #14161a;
   --bg-sunk:   #0e1013;
@@ -116,6 +124,28 @@ a:hover { text-decoration-thickness: 2px; }
 .wordmark { color: var(--accent); margin-right: 7px; vertical-align: -1px; }
 
 .topbar__spacer { flex: 1; }
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 5px 9px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--text); border-color: var(--border); background: var(--bg-sunk); }
+.theme-toggle__name { line-height: 1; }
+
+/* The label is redundant once space is tight; the icon carries the state. */
+@media (max-width: 30rem) {
+  .theme-toggle__name { display: none; }
+}
 
 /* --- tool page header ------------------------------------------------------ */
 

@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect } from 'preact/hooks';
+import { ThemeToggle } from './ThemeToggle.tsx';
 import { Wordmark } from './Wordmark.tsx';
 import { homeUrl } from '../lib/paths.ts';
 import { toolBySlug } from '../registry.ts';
@@ -26,6 +27,7 @@ export function ToolShell({ slug, wide, children }: Props) {
           <Wordmark />
           tools
         </a>
+        <ThemeToggle />
       </header>
 
       {tool && (
