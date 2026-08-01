@@ -243,6 +243,27 @@ describe('error handling', () => {
   });
 });
 
+describe('large inputs', () => {
+  // The engine spread selector results into an accumulator with push(...arr),
+  // which throws RangeError past ~130k arguments — so a wildcard, wide slice or
+  // filter over a big array crashed the tool it exists to inspect.
+  const wide = { items: Array.from({ length: 200_000 }, (_, i) => i) };
+
+  it('handles a wildcard over a very large array', () => {
+    expect(values(wide, '$.items[*]')).toHaveLength(200_000);
+  });
+
+  it('handles a filter matching most of a very large array', () => {
+    const result = query(wide, '$.items[?(@ >= 10)]');
+    expect(isQueryError(result)).toBe(false);
+    if (!isQueryError(result)) expect(result.matches).toHaveLength(199_990);
+  });
+
+  it('handles a wide slice over a very large array', () => {
+    expect(values(wide, '$.items[0:200000]')).toHaveLength(200_000);
+  });
+});
+
 describe('safety', () => {
   it('treats an inherited-looking key as absent', () => {
     // `.constructor`/`.toString` must not leak prototype members.

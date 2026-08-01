@@ -415,6 +415,19 @@ function parseFilter(s: string): Expr {
 const isObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v);
 
+/**
+ * Appends every item of `items` to `target` in place.
+ *
+ * Deliberately a loop rather than `target.push(...items)`: the spread passes
+ * each element as an argument, and an engine caps that at ~130k, throwing
+ * RangeError beyond it. A wildcard, wide slice or broad filter over a large
+ * pasted array produces exactly that many matches, so the spread crashed the
+ * tool on the inputs it exists to inspect.
+ */
+function extend<T>(target: T[], items: T[]): void {
+  for (let k = 0; k < items.length; k++) target.push(items[k]!);
+}
+
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function childPath(base: string, key: string | number): string {
@@ -480,7 +493,7 @@ function applySelector(sel: Selector, node: unknown, path: string, root: unknown
         : [];
     case 'union': {
       const out: Match[] = [];
-      for (const item of sel.items) out.push(...applySelector(item, node, path, root));
+      for (const item of sel.items) extend(out, applySelector(item, node, path, root));
       return out;
     }
     case 'filter': {
@@ -601,10 +614,10 @@ export function query(root: unknown, path: string): QueryResult {
     for (const node of nodes) {
       if (step.descendant) {
         for (const d of descendants(node.value, node.path)) {
-          next.push(...applySelector(step.selector, d.value, d.path, root));
+          extend(next, applySelector(step.selector, d.value, d.path, root));
         }
       } else {
-        next.push(...applySelector(step.selector, node.value, node.path, root));
+        extend(next, applySelector(step.selector, node.value, node.path, root));
       }
     }
     nodes = dedupe(next);
