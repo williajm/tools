@@ -140,6 +140,51 @@ test('a JSONPath query with thousands of matches renders a capped table', async 
   await expect(page.locator('table.data tbody tr')).toHaveCount(500);
 });
 
+test('a result exactly at the render cap shows no truncation note', async ({ page }) => {
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+  await page
+    .getByLabel('JSON', { exact: true })
+    .fill(JSON.stringify(Array.from({ length: 500 }, (_, i) => i)));
+  await page.getByLabel('JSONPath').fill('$[*]');
+
+  await expect(page.getByText('500 matches.', { exact: true })).toBeVisible();
+  await expect(page.locator('table.data tbody tr')).toHaveCount(500);
+});
+
+test('Copy after a capped table still yields every matched value', async ({ context, page }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+  await page
+    .getByLabel('JSON', { exact: true })
+    .fill(JSON.stringify(Array.from({ length: 600 }, (_, i) => i)));
+  await page.getByLabel('JSONPath').fill('$[*]');
+  await expect(page.getByText('600 matches. Showing the first 500')).toBeVisible();
+
+  const copy = page.getByRole('button', { name: /^Copy$|Copied/ });
+  await copy.click();
+  await expect(copy).toHaveText('Copied');
+
+  const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as number[];
+  expect(copied).toHaveLength(600);
+  expect(copied[599]).toBe(599);
+});
+
+test('query errors and empty results surface as notes, not blank panels', async ({ page }) => {
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+
+  await page.getByLabel('JSONPath').fill('store.book');
+  await expect(page.getByText(/must start with '\$'/)).toBeVisible();
+
+  await page.getByLabel('JSONPath').fill('$.nope');
+  await expect(page.getByText('No matches.', { exact: true })).toBeVisible();
+
+  await page.getByLabel('JSON', { exact: true }).fill('{oops');
+  await expect(page.locator('.note.note--error')).toContainText('JSON');
+});
+
 /**
  * Regression: a NumericDate outside the range Date can represent threw
  * RangeError out of the claims table while rendering, which blanked the entire

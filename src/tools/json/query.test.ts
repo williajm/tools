@@ -81,6 +81,29 @@ describe('recursive descent', () => {
   it('combines descent with a wildcard', () => {
     expect(values(store, '$..book[*].isbn')).toEqual(['0-553-21311-3', '0-395-19395-8']);
   });
+
+  it('applies an index selector under descent', () => {
+    expect(matches({ a: [[10, 20], [30]] }, '$..[0]').map((m) => m.path)).toEqual([
+      '$.a[0]',
+      '$.a[0][0]',
+      '$.a[1][0]',
+    ]);
+  });
+
+  it('applies a quoted name under descent', () => {
+    expect(values(store, "$..['price']")).toEqual([8.95, 12.99, 8.99, 22.99, 19.95]);
+  });
+
+  it('selects every child of every node with ..[*]', () => {
+    expect(values({ a: { b: 1 }, c: [2] }, '$..[*]')).toEqual([{ b: 1 }, [2], 1, 2]);
+  });
+
+  it('applies a filter under descent', () => {
+    expect(values(store, '$..[?(@.price < 10)].title')).toEqual([
+      'Sayings of the Century',
+      'Moby Dick',
+    ]);
+  });
 });
 
 describe('array indices and slices', () => {
@@ -129,6 +152,44 @@ describe('array indices and slices', () => {
     // Regression: $.a[0:2:1:999] silently behaved as $.a[0:2:1].
     const result = query(nums, '$.a[0:2:1:999]');
     expect(isQueryError(result) && result.error).toMatch(/slice/i);
+  });
+
+  it('returns nothing for a zero step', () => {
+    expect(values(nums, '$.a[::0]')).toEqual([]);
+  });
+
+  it('rejects a non-numeric slice bound', () => {
+    const result = query(nums, '$.a[x:2]');
+    expect(isQueryError(result) && result.error).toMatch(/slice bound/);
+  });
+});
+
+describe('quoted names with structural characters', () => {
+  it('does not treat a dot in a quoted name as a step', () => {
+    expect(values({ 'a.b': 1, a: { b: 2 } }, "$['a.b']")).toEqual([1]);
+  });
+
+  it('does not split a union on a comma inside quotes', () => {
+    expect(values({ 'a,b': 3 }, "$['a,b']")).toEqual([3]);
+  });
+
+  it('does not count brackets inside quotes', () => {
+    expect(values({ 'a[0]': 4 }, "$['a[0]']")).toEqual([4]);
+  });
+
+  it('quotes non-identifier names in the reported path', () => {
+    expect(matches({ 'a b': 1 }, "$['a b']")[0]!.path).toBe("$['a b']");
+  });
+});
+
+describe('selectors on mismatched types', () => {
+  it('returns nothing for a wildcard over a scalar', () => {
+    expect(values({ n: 5 }, '$.n.*')).toEqual([]);
+  });
+
+  it('returns nothing for a slice over a non-array', () => {
+    expect(values({ o: { x: 1 } }, '$.o[0:2]')).toEqual([]);
+    expect(values({ n: 5 }, '$.n[1:3]')).toEqual([]);
   });
 });
 
@@ -227,6 +288,74 @@ describe('filters', () => {
     const data = { threshold: 10, items: [{ n: 5 }, { n: 15 }] };
     expect(values(data, '$.items[?(@.n > $.threshold)]')).toEqual([{ n: 15 }]);
   });
+
+  it('lets && bind tighter than ||', () => {
+    const data = { items: [{ a: 1 }, { b: 1 }, { b: 1, c: 1 }, { c: 1 }] };
+    // a || (b && c): {a:1} passes with no c at all; {b:1} alone fails.
+    expect(values(data, '$.items[?(@.a == 1 || @.b == 1 && @.c == 1)]')).toEqual([
+      { a: 1 },
+      { b: 1, c: 1 },
+    ]);
+  });
+
+  it('reaches into the current node with bracket segments', () => {
+    expect(values({ rows: [{ 'a b': 1 }, { 'a b': 2 }] }, "$.rows[?(@['a b'] == 1)]")).toEqual([
+      { 'a b': 1 },
+    ]);
+    expect(values({ rows: [[1, 9], [2, 8]] }, '$.rows[?(@[0] == 1)]')).toEqual([[1, 9]]);
+  });
+
+  it('counts negative filter indices from the end', () => {
+    expect(values({ rows: [[1, 9], [2, 8]] }, '$.rows[?(@[-1] == 8)]')).toEqual([[2, 8]]);
+  });
+
+  it('treats an out-of-range filter index as missing', () => {
+    expect(values({ rows: [[1]] }, '$.rows[?(@[9] == 1)]')).toEqual([]);
+    expect(values({ rows: [[1]] }, '$.rows[?(@[9])]')).toEqual([]);
+  });
+
+  it('compares arrays and objects structurally', () => {
+    const arrs = { want: ['x', 'y'], rows: [{ tags: ['x', 'y'] }, { tags: ['x'] }, { tags: ['x', 'z'] }] };
+    expect(values(arrs, '$.rows[?(@.tags == $.want)]')).toEqual([{ tags: ['x', 'y'] }]);
+    const objs = { want: { k: 1 }, rows: [{ cfg: { k: 1 } }, { cfg: { k: 2 } }, { cfg: { k: 1, j: 2 } }] };
+    expect(values(objs, '$.rows[?(@.cfg == $.want)]')).toEqual([{ cfg: { k: 1 } }]);
+    expect(values({ want: ['x'], rows: [{ tags: ['x'] }] }, '$.rows[?(@.tags != $.want)]')).toEqual([]);
+  });
+
+  it('distinguishes null from missing', () => {
+    const data = { rows: [{ x: null }, { x: 1 }, {}] };
+    expect(values(data, '$.rows[?(@.x == null)]')).toEqual([{ x: null }]);
+    // A missing field is not equal to null — but it is "not null".
+    expect(values(data, '$.rows[?(@.x != null)]')).toEqual([{ x: 1 }, {}]);
+  });
+
+  it('compares boolean literals', () => {
+    const data = { rows: [{ on: true }, { on: false }] };
+    expect(values(data, '$.rows[?(@.on == true)]')).toEqual([{ on: true }]);
+    expect(values(data, '$.rows[?(@.on == false)]')).toEqual([{ on: false }]);
+  });
+
+  it('uses a bare literal as its own truthiness', () => {
+    expect(values({ rows: [1, 2] }, '$.rows[?(true)]')).toEqual([1, 2]);
+    expect(values({ rows: [1, 2] }, '$.rows[?(false)]')).toEqual([]);
+  });
+
+  it('orders strings lexicographically', () => {
+    expect(values(['apple', 'melon', 'zebra'], "$[?(@ < 'melon')]")).toEqual(['apple']);
+    expect(values(['apple', 'melon', 'zebra'], "$[?(@ >= 'melon')]")).toEqual(['melon', 'zebra']);
+  });
+
+  it('parses negative and exponent number literals', () => {
+    expect(values([-5, 0, 3], '$[?(@ > -1)]')).toEqual([0, 3]);
+    expect(values([50, 500], '$[?(@ < 1e2)]')).toEqual([50]);
+  });
+
+  it('never orders values that are not both numbers or both strings', () => {
+    // Pins the deviation documented in query.ts: RFC 9535 would make @ <= @
+    // true wherever @ == @ is, including for booleans and null.
+    expect(values([true], '$[?(@ <= @)]')).toEqual([]);
+    expect(values([null], '$[?(@ >= @)]')).toEqual([]);
+  });
 });
 
 describe('string escapes', () => {
@@ -277,6 +406,36 @@ describe('error handling', () => {
   it('reports a bare word instead of a quoted string', () => {
     const result = query(store, '$.book[?(@.category == reference)]');
     expect(isQueryError(result) && result.error).toMatch(/did you mean/);
+  });
+
+  it('rejects a step that is neither a dot nor a bracket', () => {
+    const result = query(store, '$x');
+    expect(isQueryError(result) && result.error).toMatch(/Unexpected "x"/);
+  });
+
+  it('rejects an unquoted name in brackets', () => {
+    const result = query(store, '$[abc]');
+    expect(isQueryError(result) && result.error).toMatch(/not an index, slice or quoted name/);
+  });
+
+  it('rejects an illegal character in a filter', () => {
+    const result = query(store, '$.a[?(@.x # 1)]');
+    expect(isQueryError(result) && result.error).toMatch(/Unexpected "#"/);
+  });
+
+  it('rejects an unclosed group in a filter', () => {
+    const result = query(store, '$.a[?((@.x == 1)]');
+    expect(isQueryError(result)).toBe(true);
+  });
+
+  it('rejects a filter path bracket holding neither a number nor a quoted name', () => {
+    const result = query(store, '$.a[?(@[x] == 1)]');
+    expect(isQueryError(result) && result.error).toMatch(/number or quoted name/);
+  });
+
+  it('rejects comparing a parenthesised group', () => {
+    const result = query(store, '$.a[?((@.x == 1) == 2)]');
+    expect(isQueryError(result) && result.error).toMatch(/cannot be compared/);
   });
 });
 
