@@ -128,9 +128,10 @@ function parsePath(input: string): Step[] {
     if (trimmed === '') throw new ParseError('Empty [] is not a valid selector.');
     if (trimmed === '*') return { kind: 'wildcard' };
     if (trimmed[0] === '?') {
-      let e = trimmed.slice(1).trim();
-      if (e[0] === '(' && e[e.length - 1] === ')') e = e.slice(1, -1);
-      return { kind: 'filter', expr: parseFilter(e) };
+      // The filter grammar parses '(...)' itself; stripping an outer pair here
+      // would mangle filters whose first and last parens are separate groups,
+      // as in [?(@.a == 1) || (@.b == 1)].
+      return { kind: 'filter', expr: parseFilter(trimmed.slice(1)) };
     }
 
     const parts = splitTopLevel(inner);
@@ -204,7 +205,9 @@ function parseBracketItem(raw: string): Selector {
     return { kind: 'name', name: unescapeString(part.slice(1, -1)) };
   }
   if (part.includes(':')) {
-    const [s, e, st] = part.split(':');
+    const pieces = part.split(':');
+    if (pieces.length > 3) throw new ParseError(`A slice takes at most start:end:step — "${part}" has ${pieces.length} parts.`);
+    const [s, e, st] = pieces;
     return {
       kind: 'slice',
       start: sliceNum(s),
@@ -224,9 +227,11 @@ function sliceNum(s: string | undefined): number | null {
 
 function unescapeString(s: string): string {
   return s.replace(/\\(u[0-9a-fA-F]{4}|.)/g, (_, esc: string) => {
-    if (esc[0] === 'u') return String.fromCharCode(parseInt(esc.slice(1), 16));
-    const map: Record<string, string> = { n: '\n', t: '\t', r: '\r', '\\': '\\', "'": "'", '"': '"', '/': '/' };
-    return map[esc] ?? esc;
+    if (esc.length === 5) return String.fromCharCode(parseInt(esc.slice(1), 16));
+    const map: Record<string, string> = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', '\\': '\\', "'": "'", '"': '"', '/': '/' };
+    const decoded = map[esc];
+    if (decoded === undefined) throw new ParseError(`\\${esc} is not a valid string escape.`);
+    return decoded;
   });
 }
 
@@ -564,6 +569,9 @@ function evalExpr(expr: Expr, at: unknown, root: unknown): boolean {
       if (expr.op === '==') return lm || rm ? lm && rm : deepEqual(l, r);
       if (expr.op === '!=') return lm || rm ? !(lm && rm) : !deepEqual(l, r);
       if (lm || rm) return false;
+      // TODO: RFC 9535 defines a <= b as (a < b || a == b), so <= and >= should
+      // also hold for equal booleans, nulls, arrays, objects and two missing
+      // operands. This subset only orders numbers and strings.
       const bothNum = typeof l === 'number' && typeof r === 'number';
       const bothStr = typeof l === 'string' && typeof r === 'string';
       if (!bothNum && !bothStr) return false;
@@ -579,7 +587,13 @@ function evalExpr(expr: Expr, at: unknown, root: unknown): boolean {
   }
 }
 
-/** Removes matches that resolve to the same normalized path, keeping the first. */
+/**
+ * Removes matches that resolve to the same normalized path, keeping the first.
+ *
+ * TODO: RFC 9535 nodelists keep duplicates ($[0,0] selects the first element
+ * twice); deduping is a deliberate deviation so the result table shows one row
+ * per node and can key rows by path. Revisit if strict conformance matters.
+ */
 function dedupe(matches: Match[]): Match[] {
   const seen = new Set<string>();
   const out: Match[] = [];

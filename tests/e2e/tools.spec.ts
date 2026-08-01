@@ -124,6 +124,23 @@ test('a JSONPath filter runs under the shipped CSP', async ({ page }) => {
 });
 
 /**
+ * Regression: the results table rendered one row per match, so a broad query
+ * over a large document built hundreds of thousands of DOM rows and hung the
+ * tab. The table is capped; the count still reports every match.
+ */
+test('a JSONPath query with thousands of matches renders a capped table', async ({ page }) => {
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+  await page
+    .getByLabel('JSON', { exact: true })
+    .fill(JSON.stringify(Array.from({ length: 2000 }, (_, i) => i)));
+  await page.getByLabel('JSONPath').fill('$[*]');
+
+  await expect(page.getByText('2000 matches. Showing the first 500')).toBeVisible();
+  await expect(page.locator('table.data tbody tr')).toHaveCount(500);
+});
+
+/**
  * Regression: a NumericDate outside the range Date can represent threw
  * RangeError out of the claims table while rendering, which blanked the entire
  * tool — no output, no error, just the token box.

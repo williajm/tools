@@ -39,6 +39,13 @@ const INITIAL: State = {
   sort: false,
 };
 
+/**
+ * A broad query over a large document can match hundreds of thousands of nodes;
+ * the engine handles that, but one table row per match would hang the tab, so
+ * the table is capped. The count and the Copy button still cover every match.
+ */
+const MAX_RENDERED_MATCHES = 500;
+
 export function Json() {
   const [state, setState] = useHashState<State>(INITIAL);
   const set = <K extends keyof State>(key: K, value: State[K]) => setState({ ...state, [key]: value });
@@ -282,6 +289,8 @@ export function Json() {
                   {queryResult.matches.length === 0
                     ? 'No matches.'
                     : `${queryResult.matches.length} match${queryResult.matches.length === 1 ? '' : 'es'}.`}
+                  {queryResult.matches.length > MAX_RENDERED_MATCHES &&
+                    ` Showing the first ${MAX_RENDERED_MATCHES}; Copy still copies every value.`}
                 </div>
                 {queryResult.matches.length > 0 && (
                   <>
@@ -299,7 +308,7 @@ export function Json() {
                           </tr>
                         </thead>
                         <tbody>
-                          {queryResult.matches.map((m) => (
+                          {queryResult.matches.slice(0, MAX_RENDERED_MATCHES).map((m) => (
                             <tr key={m.path}>
                               <td class="mono wrap-anywhere">{m.path}</td>
                               <td class="mono wrap-anywhere">{JSON.stringify(m.value)}</td>

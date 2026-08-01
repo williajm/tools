@@ -124,6 +124,12 @@ describe('array indices and slices', () => {
   it('gives sliced elements their real index in the path', () => {
     expect(matches(nums, '$.a[1:3]').map((m) => m.path)).toEqual(['$.a[1]', '$.a[2]']);
   });
+
+  it('rejects a slice with more than three parts', () => {
+    // Regression: $.a[0:2:1:999] silently behaved as $.a[0:2:1].
+    const result = query(nums, '$.a[0:2:1:999]');
+    expect(isQueryError(result) && result.error).toMatch(/slice/i);
+  });
 });
 
 describe('unions', () => {
@@ -192,6 +198,13 @@ describe('filters', () => {
     ]);
   });
 
+  it('accepts grouped conditions whose outer parens do not enclose the filter', () => {
+    // Regression: the first '(' and last ')' were stripped as if they were one
+    // enclosing pair, mangling this into `@.a == 1) || (@.b == 1`.
+    const data = { items: [{ a: 1 }, { b: 1 }, { c: 1 }] };
+    expect(values(data, '$.items[?(@.a == 1) || (@.b == 1)]')).toEqual([{ a: 1 }, { b: 1 }]);
+  });
+
   it('can compare a field against another field', () => {
     const data = { rows: [{ lo: 1, hi: 2 }, { lo: 5, hi: 3 }] };
     expect(values(data, '$.rows[?(@.lo < @.hi)]')).toEqual([{ lo: 1, hi: 2 }]);
@@ -213,6 +226,30 @@ describe('filters', () => {
   it('can reference the root inside a filter', () => {
     const data = { threshold: 10, items: [{ n: 5 }, { n: 15 }] };
     expect(values(data, '$.items[?(@.n > $.threshold)]')).toEqual([{ n: 15 }]);
+  });
+});
+
+describe('string escapes', () => {
+  it('decodes backspace and form-feed escapes', () => {
+    // Regression: \b and \f were missing from the escape map, so $['a\b']
+    // silently matched the key "ab" instead of "a<backspace>".
+    expect(values({ 'a\b': 1, ab: 2 }, "$['a\\b']")).toEqual([1]);
+    expect(values({ 'a\f': 1, af: 2 }, "$['a\\f']")).toEqual([1]);
+  });
+
+  it('decodes unicode escapes', () => {
+    expect(values({ café: 1 }, "$['caf\\u00e9']")).toEqual([1]);
+  });
+
+  it('decodes escapes in filter string literals too', () => {
+    const data = { rows: [{ k: 'a\b' }, { k: 'ab' }] };
+    expect(values(data, "$.rows[?(@.k == 'a\\b')]")).toEqual([{ k: 'a\b' }]);
+  });
+
+  it('rejects an unknown escape instead of dropping the backslash', () => {
+    // Regression: $['a\x'] silently matched the key "ax".
+    const result = query({ ax: 1 }, "$['a\\x']");
+    expect(isQueryError(result) && result.error).toMatch(/escape/);
   });
 });
 
