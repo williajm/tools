@@ -14,13 +14,15 @@ import {
   validateSchema,
   type ValidationResult,
 } from './json.ts';
+import { query, isQueryError } from './query.ts';
 
-type Mode = 'format' | 'validate' | 'diff';
+type Mode = 'format' | 'query' | 'validate' | 'diff';
 
 interface State {
   input: string;
   right: string;
   schema: string;
+  path: string;
   mode: Mode;
   indent: number;
   sort: boolean;
@@ -31,6 +33,7 @@ const INITIAL: State = {
   right: '{\n  "name": "Ada",\n  "age": 37,\n  "tags": ["maths", "engines"]\n}',
   schema:
     '{\n  "type": "object",\n  "required": ["name", "age"],\n  "properties": {\n    "name": { "type": "string" },\n    "age": { "type": "integer", "minimum": 0 }\n  }\n}',
+  path: '$.tags[*]',
   mode: 'format',
   indent: 2,
   sort: false,
@@ -60,6 +63,22 @@ export function Json() {
   const entries = useMemo(
     () => (right && !isFailure(left) && !isFailure(right) ? diffJson(left.value, right.value) : []),
     [left, right],
+  );
+
+  const queryResult = useMemo(
+    () => (state.mode === 'query' && !isFailure(left) ? query(left.value, state.path) : null),
+    [state.mode, left, state.path],
+  );
+  const queryValues = useMemo(
+    () =>
+      queryResult && !isQueryError(queryResult)
+        ? JSON.stringify(
+            queryResult.matches.map((m) => m.value),
+            null,
+            2,
+          )
+        : '',
+    [queryResult],
   );
 
   const [validation, setValidation] = useState<ValidationResult | null>(null);
@@ -102,9 +121,9 @@ export function Json() {
         <div class="row">
           <Segmented
             label="Mode"
-            options={['format', 'validate', 'diff'] as const}
+            options={['format', 'query', 'validate', 'diff'] as const}
             value={state.mode}
-            names={{ format: 'Format', validate: 'Schema', diff: 'Diff' }}
+            names={{ format: 'Format', query: 'Query', validate: 'Schema', diff: 'Diff' }}
             onChange={(next) => set('mode', next)}
           />
           {state.mode === 'format' && (
@@ -161,6 +180,26 @@ export function Json() {
                 onInput={(e) => set('schema', (e.target as HTMLTextAreaElement).value)}
               />
             </label>
+          )}
+
+          {state.mode === 'query' && (
+            <div class="stack stack--tight">
+              <label class="field">
+                <span class="field__label">JSONPath</span>
+                <input
+                  type="text"
+                  class="mono"
+                  value={state.path}
+                  spellcheck={false}
+                  placeholder="$.store.book[?(@.price < 10)].title"
+                  onInput={(e) => set('path', (e.target as HTMLInputElement).value)}
+                />
+              </label>
+              <p class="small dim" style="margin:0">
+                <code>$</code> root · <code>.name</code>/<code>[*]</code> child · <code>..</code> recurse ·{' '}
+                <code>[0]</code>/<code>[-1]</code>/<code>[1:3]</code> index · <code>[?(@.x &gt; 1)]</code> filter
+              </p>
+            </div>
           )}
 
           {state.mode === 'format' && (
@@ -229,6 +268,49 @@ export function Json() {
                   </tbody>
                 </table>
               </div>
+            )}
+          </>
+        )}
+
+        {state.mode === 'query' && queryResult && (
+          <>
+            {isQueryError(queryResult) ? (
+              <div class="note note--error">{queryResult.error}</div>
+            ) : (
+              <>
+                <div class={queryResult.matches.length === 0 ? 'note note--warn' : 'note note--ok'}>
+                  {queryResult.matches.length === 0
+                    ? 'No matches.'
+                    : `${queryResult.matches.length} match${queryResult.matches.length === 1 ? '' : 'es'}.`}
+                </div>
+                {queryResult.matches.length > 0 && (
+                  <>
+                    <div class="row">
+                      <span class="field__label">Values</span>
+                      <span class="topbar__spacer" />
+                      <CopyButton value={queryValues} />
+                    </div>
+                    <div class="table-scroll">
+                      <table class="data">
+                        <thead>
+                          <tr>
+                            <th style="width:18rem">Path</th>
+                            <th>Value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {queryResult.matches.map((m) => (
+                            <tr key={m.path}>
+                              <td class="mono wrap-anywhere">{m.path}</td>
+                              <td class="mono wrap-anywhere">{JSON.stringify(m.value)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </>
             )}
           </>
         )}

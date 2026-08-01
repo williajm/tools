@@ -70,7 +70,7 @@ export const TOOLS: Tool[] = [
   {
     slug: 'json',
     name: 'JSON toolkit',
-    blurb: 'Format, minify, validate against a JSON Schema, and diff.',
+    blurb: 'Format, minify, query with JSONPath, validate against a JSON Schema, and diff.',
     category: 'Inspect & validate',
     offline: true,
   },

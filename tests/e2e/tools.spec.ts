@@ -99,6 +99,31 @@ test('JSON Schema validation reports a real violation with its path', async ({ p
 });
 
 /**
+ * The same CSP hazard as schema validation: a JSONPath filter predicate is the
+ * one piece that a compiling library would run through `new Function`, which
+ * `script-src 'self'` forbids. This drives a real filter in a real browser to
+ * prove the interpreter evaluates it without ever reaching for eval.
+ */
+test('a JSONPath filter runs under the shipped CSP', async ({ page }) => {
+  const problems: string[] = [];
+  page.on('pageerror', (error) => problems.push(`uncaught: ${error.message}`));
+  page.on('console', (message) => {
+    if (message.type() === 'error') problems.push(`console: ${message.text()}`);
+  });
+
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+  await page
+    .getByLabel('JSON', { exact: true })
+    .fill('{"book":[{"t":"a","price":5},{"t":"b","price":20}]}');
+  await page.getByLabel('JSONPath').fill('$.book[?(@.price < 10)].t');
+
+  await expect(page.getByText('1 match.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '"a"', exact: true })).toBeVisible();
+  expect(problems).toEqual([]);
+});
+
+/**
  * Regression: a NumericDate outside the range Date can represent threw
  * RangeError out of the claims table while rendering, which blanked the entire
  * tool — no output, no error, just the token box.
