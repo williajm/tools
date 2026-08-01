@@ -99,6 +99,93 @@ test('JSON Schema validation reports a real violation with its path', async ({ p
 });
 
 /**
+ * The same CSP hazard as schema validation: a JSONPath filter predicate is the
+ * one piece that a compiling library would run through `new Function`, which
+ * `script-src 'self'` forbids. This drives a real filter in a real browser to
+ * prove the interpreter evaluates it without ever reaching for eval.
+ */
+test('a JSONPath filter runs under the shipped CSP', async ({ page }) => {
+  const problems: string[] = [];
+  page.on('pageerror', (error) => problems.push(`uncaught: ${error.message}`));
+  page.on('console', (message) => {
+    if (message.type() === 'error') problems.push(`console: ${message.text()}`);
+  });
+
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+  await page
+    .getByLabel('JSON', { exact: true })
+    .fill('{"book":[{"t":"a","price":5},{"t":"b","price":20}]}');
+  await page.getByLabel('JSONPath').fill('$.book[?(@.price < 10)].t');
+
+  await expect(page.getByText('1 match.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '"a"', exact: true })).toBeVisible();
+  expect(problems).toEqual([]);
+});
+
+/**
+ * Regression: the results table rendered one row per match, so a broad query
+ * over a large document built hundreds of thousands of DOM rows and hung the
+ * tab. The table is capped; the count still reports every match.
+ */
+test('a JSONPath query with thousands of matches renders a capped table', async ({ page }) => {
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+  await page
+    .getByLabel('JSON', { exact: true })
+    .fill(JSON.stringify(Array.from({ length: 2000 }, (_, i) => i)));
+  await page.getByLabel('JSONPath').fill('$[*]');
+
+  await expect(page.getByText('2000 matches. Showing the first 500')).toBeVisible();
+  await expect(page.locator('table.data tbody tr')).toHaveCount(500);
+});
+
+test('a result exactly at the render cap shows no truncation note', async ({ page }) => {
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+  await page
+    .getByLabel('JSON', { exact: true })
+    .fill(JSON.stringify(Array.from({ length: 500 }, (_, i) => i)));
+  await page.getByLabel('JSONPath').fill('$[*]');
+
+  await expect(page.getByText('500 matches.', { exact: true })).toBeVisible();
+  await expect(page.locator('table.data tbody tr')).toHaveCount(500);
+});
+
+test('Copy after a capped table still yields every matched value', async ({ context, page }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+  await page
+    .getByLabel('JSON', { exact: true })
+    .fill(JSON.stringify(Array.from({ length: 600 }, (_, i) => i)));
+  await page.getByLabel('JSONPath').fill('$[*]');
+  await expect(page.getByText('600 matches. Showing the first 500')).toBeVisible();
+
+  const copy = page.getByRole('button', { name: /^Copy$|Copied/ });
+  await copy.click();
+  await expect(copy).toHaveText('Copied');
+
+  const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText())) as number[];
+  expect(copied).toHaveLength(600);
+  expect(copied[599]).toBe(599);
+});
+
+test('query errors and empty results surface as notes, not blank panels', async ({ page }) => {
+  await page.goto('./json/');
+  await page.getByRole('button', { name: 'Query' }).click();
+
+  await page.getByLabel('JSONPath').fill('store.book');
+  await expect(page.getByText(/must start with '\$'/)).toBeVisible();
+
+  await page.getByLabel('JSONPath').fill('$.nope');
+  await expect(page.getByText('No matches.', { exact: true })).toBeVisible();
+
+  await page.getByLabel('JSON', { exact: true }).fill('{oops');
+  await expect(page.locator('.note.note--error')).toContainText('JSON');
+});
+
+/**
  * Regression: a NumericDate outside the range Date can represent threw
  * RangeError out of the claims table while rendering, which blanked the entire
  * tool — no output, no error, just the token box.
