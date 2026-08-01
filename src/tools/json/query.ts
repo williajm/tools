@@ -399,7 +399,10 @@ function parseFilter(s: string): Expr {
         eat();
         const inside = eat();
         if (inside?.t === 'string') segs.push({ kind: 'name', name: inside.v });
-        else if (inside?.t === 'number') segs.push({ kind: 'index', index: inside.v });
+        else if (inside?.t === 'number') {
+          if (!Number.isInteger(inside.v)) throw new ParseError(`Filter path [] takes an integer index, not ${inside.v}.`);
+          segs.push({ kind: 'index', index: inside.v });
+        }
         else throw new ParseError('Filter path [] takes a number or quoted name.');
         if (eat()?.t !== 'rbracket') throw new ParseError("Expected ']' in filter path.");
       } else {
@@ -610,8 +613,9 @@ function dedupe(matches: Match[]): Match[] {
  * Runs a JSONPath expression against a parsed value.
  *
  * Returns each match with its normalized path, so the UI can show where every
- * result came from. Parse errors are returned rather than thrown, so a
- * half-typed expression reports a message instead of blanking the tool.
+ * result came from. Parse and evaluation errors are returned rather than
+ * thrown, so a half-typed expression or a pathologically deep document
+ * reports a message instead of blanking the tool.
  */
 export function query(root: unknown, path: string): QueryResult {
   if (!path.trim()) return { error: 'Enter a JSONPath expression.' };
@@ -623,18 +627,27 @@ export function query(root: unknown, path: string): QueryResult {
   }
 
   let nodes: Match[] = [{ value: root, path: '$' }];
-  for (const step of steps) {
-    const next: Match[] = [];
-    for (const node of nodes) {
-      if (step.descendant) {
-        for (const d of descendants(node.value, node.path)) {
-          extend(next, applySelector(step.selector, d.value, d.path, root));
+  try {
+    for (const step of steps) {
+      const next: Match[] = [];
+      for (const node of nodes) {
+        if (step.descendant) {
+          for (const d of descendants(node.value, node.path)) {
+            extend(next, applySelector(step.selector, d.value, d.path, root));
+          }
+        } else {
+          extend(next, applySelector(step.selector, node.value, node.path, root));
         }
-      } else {
-        extend(next, applySelector(step.selector, node.value, node.path, root));
       }
+      nodes = dedupe(next);
     }
-    nodes = dedupe(next);
+  } catch (err) {
+    // The recursive walk (descendants, deepEqual) can exhaust the call stack
+    // on a pathologically deep document — which JSON.parse, being iterative,
+    // happily produces. Evaluation failures become results like parse ones.
+    return {
+      error: err instanceof RangeError ? 'This document nests too deeply for that query.' : String(err),
+    };
   }
   return { matches: nodes };
 }

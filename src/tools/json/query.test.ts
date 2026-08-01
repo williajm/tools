@@ -428,6 +428,13 @@ describe('error handling', () => {
     expect(isQueryError(result)).toBe(true);
   });
 
+  it('rejects a fractional filter index', () => {
+    // Regression: @[0.5] passed the bounds check, read undefined, and then
+    // counted as an existing path, selecting every row.
+    const result = query({ rows: [[1, 2]] }, '$.rows[?(@[0.5])]');
+    expect(isQueryError(result) && result.error).toMatch(/integer/);
+  });
+
   it('rejects a filter path bracket holding neither a number nor a quoted name', () => {
     const result = query(store, '$.a[?(@[x] == 1)]');
     expect(isQueryError(result) && result.error).toMatch(/number or quoted name/);
@@ -457,6 +464,17 @@ describe('large inputs', () => {
 
   it('handles a wide slice over a very large array', () => {
     expect(values(wide, '$.items[0:200000]')).toHaveLength(200_000);
+  });
+
+  it('returns an error instead of throwing on a pathologically deep document', () => {
+    // Regression: the recursive walk exhausted the call stack and the
+    // RangeError escaped query(), blanking the tool. JSON.parse itself is
+    // iterative, so a pasted document really can nest this deep.
+    const depth = 200_000;
+    const deep = JSON.parse('['.repeat(depth) + ']'.repeat(depth)) as unknown;
+    expect(() => query(deep, '$..*')).not.toThrow();
+    const result = query(deep, '$..*');
+    if (isQueryError(result)) expect(result.error).toMatch(/deeply/);
   });
 });
 
