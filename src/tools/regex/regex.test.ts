@@ -75,6 +75,19 @@ describe('findMatches', () => {
   it('returns nothing for empty input', () => {
     expect(findMatches(/a/g, '')).toEqual([]);
   });
+
+  it('still matches an empty input when the pattern allows it', () => {
+    // Regression: an early return on '' meant /^$/ reported no match.
+    expect(findMatches(/^$/g, '').map((m) => m.index)).toEqual([0]);
+    expect(findMatches(/^$/, '')).toHaveLength(1);
+  });
+
+  it('steps over a whole code point after a zero-length match in unicode mode', () => {
+    // Regression: advancing one code unit landed inside the surrogate pair, exec
+    // snapped back to the pair's start and the same match repeated up to the cap.
+    expect(findMatches(/(?:)/gu, '😀').map((m) => m.index)).toEqual([0, 2]);
+    expect(findMatches(/(?:)/g, '😀').map((m) => m.index)).toEqual([0, 1, 2]);
+  });
 });
 
 describe('segment', () => {

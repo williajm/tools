@@ -569,12 +569,14 @@ function evalExpr(expr: Expr, at: unknown, root: unknown): boolean {
       const r = resolveOperand(expr.r, at, root);
       const lm = l === MISSING;
       const rm = r === MISSING;
-      if (expr.op === '==') return lm || rm ? lm && rm : deepEqual(l, r);
-      if (expr.op === '!=') return lm || rm ? !(lm && rm) : !deepEqual(l, r);
+      // Two missing operands compare equal (RFC 9535 §2.3.5.2.2).
+      const equal = lm || rm ? lm && rm : deepEqual(l, r);
+      if (expr.op === '==') return equal;
+      if (expr.op === '!=') return !equal;
+      // a <= b is defined as (a < b || a == b), so it holds for equal booleans,
+      // nulls, arrays and objects even though only numbers and strings order.
+      if ((expr.op === '<=' || expr.op === '>=') && equal) return true;
       if (lm || rm) return false;
-      // TODO: RFC 9535 defines a <= b as (a < b || a == b), so <= and >= should
-      // also hold for equal booleans, nulls, arrays, objects and two missing
-      // operands. This subset only orders numbers and strings.
       const bothNum = typeof l === 'number' && typeof r === 'number';
       const bothStr = typeof l === 'string' && typeof r === 'string';
       if (!bothNum && !bothStr) return false;

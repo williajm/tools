@@ -351,10 +351,18 @@ describe('filters', () => {
   });
 
   it('never orders values that are not both numbers or both strings', () => {
-    // Pins the deviation documented in query.ts: RFC 9535 would make @ <= @
-    // true wherever @ == @ is, including for booleans and null.
-    expect(values([true], '$[?(@ <= @)]')).toEqual([]);
-    expect(values([null], '$[?(@ >= @)]')).toEqual([]);
+    expect(values([true, false], '$[?(@ < true)]')).toEqual([]);
+    expect(values([null, 1], '$[?(@ > null)]')).toEqual([]);
+  });
+
+  it('treats <= and >= as "less than or equal" for every type', () => {
+    // RFC 9535: a <= b is (a < b || a == b), so equal booleans, nulls, arrays,
+    // objects and two missing operands all satisfy it.
+    expect(values([true], '$[?(@ <= @)]')).toEqual([true]);
+    expect(values([null], '$[?(@ >= @)]')).toEqual([null]);
+    expect(values([[1, 2]], '$[?(@ <= @)]')).toEqual([[1, 2]]);
+    expect(values([{ a: 1 }], '$[?(@.missing >= @.absent)]')).toEqual([{ a: 1 }]);
+    expect(values([{ a: 1 }], '$[?(@.missing >= 1)]')).toEqual([]);
   });
 });
 
