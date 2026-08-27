@@ -117,8 +117,18 @@ describe('html', () => {
     expect(fromHtml('&#x1F389;')).toBe('🎉');
   });
 
+  it('decodes the full HTML5 named table, including names with digits', () => {
+    // Regression: only six names were known and the pattern excluded digits, so
+    // &copy; and &frac12; passed through unchanged.
+    expect(fromHtml('&copy; &euro; &frac12; &sup2; &nbsp;')).toBe('© € ½ ² \u00a0');
+    // Names are case-sensitive: &Eacute; and &eacute; are different characters.
+    expect(fromHtml('&Eacute;&eacute;')).toBe('Éé');
+  });
+
   it('leaves unknown entities untouched rather than guessing', () => {
     expect(fromHtml('&notarealentity;')).toBe('&notarealentity;');
+    // Legacy no-semicolon forms are a browser leniency, not something to decode.
+    expect(fromHtml('&copy 2026')).toBe('&copy 2026');
   });
 
   /**

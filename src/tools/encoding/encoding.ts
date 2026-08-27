@@ -5,6 +5,8 @@
  * directly, since those only handle Latin-1 and silently mangle anything else.
  */
 
+import { decodeHTMLStrict } from 'entities';
+
 export type Scheme = 'base64' | 'base64url' | 'url' | 'html' | 'hex';
 
 export const SCHEMES: readonly Scheme[] = ['base64', 'base64url', 'url', 'html', 'hex'] as const;
@@ -123,15 +125,6 @@ export function toHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c] ?? c);
 }
 
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  nbsp: ' ',
-};
-
 /** Largest Unicode code point. `String.fromCodePoint` throws RangeError beyond it. */
 const MAX_CODE_POINT = 0x10ffff;
 
@@ -153,14 +146,16 @@ function referenceToString(code: number, entity: string): string {
 export function fromHtml(text: string): string {
   // Deliberately hand-rolled rather than assigning to innerHTML, which would
   // execute or fetch things depending on the markup pasted in.
-  return text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, body: string) => {
+  return text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z0-9]+);/g, (match, body: string) => {
     if (body.startsWith('#x') || body.startsWith('#X')) {
       return referenceToString(Number.parseInt(body.slice(2), 16), match);
     }
     if (body.startsWith('#')) {
       return referenceToString(Number.parseInt(body.slice(1), 10), match);
     }
-    return NAMED_ENTITIES[body.toLowerCase()] ?? match;
+    // Strict mode: the full HTML5 table, case-sensitive, semicolon required.
+    // An unknown name comes back unchanged rather than guessed at.
+    return decodeHTMLStrict(match);
   });
 }
 

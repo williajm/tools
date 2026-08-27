@@ -2,25 +2,25 @@ import { defineConfig } from 'vite';
 import preact from '@preact/preset-vite';
 import license from 'rollup-plugin-license';
 import { licensesPage } from './scripts/licenses-page.ts';
-import { readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TOOLS } from './src/shared/registry.ts';
 
 const root = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Multi-page build. Every top-level directory containing an index.html becomes
- * its own entry point, so each tool ships only its own JS. Adding a tool means
- * adding a directory — no config change needed.
+ * Multi-page build. Every tool in the registry becomes its own entry point, so
+ * each tool ships only its own JS. `scripts/gen-pages.mjs` (prebuild) writes the
+ * index.html files from the same registry, so adding a tool means adding a
+ * registry entry — no config change needed.
+ *
+ * Deliberately not "every directory containing an index.html": tooling writes
+ * ones of its own (`coverage/`, `playwright-report/`) and those were being
+ * bundled and deployed.
  */
 function htmlEntries(): Record<string, string> {
   const entries: Record<string, string> = { home: resolve(root, 'index.html') };
-  for (const name of readdirSync(root, { withFileTypes: true })) {
-    if (!name.isDirectory() || name.name.startsWith('.')) continue;
-    if (['src', 'node_modules', 'dist', 'docs', 'tests', 'scripts', 'public'].includes(name.name)) continue;
-    const html = resolve(root, name.name, 'index.html');
-    if (existsSync(html)) entries[name.name] = html;
-  }
+  for (const tool of TOOLS) entries[tool.slug] = resolve(root, tool.slug, 'index.html');
   return entries;
 }
 

@@ -78,10 +78,10 @@ export function groupNames(source: string): Map<number, string> {
 
 export function findMatches(regex: RegExp, input: string): MatchInfo[] {
   const matches: MatchInfo[] = [];
-  if (!input) return matches;
 
   // A global regex is stateful; work on a fresh copy so repeated renders agree.
   const global = regex.global || regex.sticky;
+  const unicode = regex.unicode || regex.flags.includes('v');
   const re = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : `${regex.flags}g`);
   // Depends only on the pattern, so it is resolved once rather than per match.
   const nameByIndex = groupNames(regex.source);
@@ -98,8 +98,10 @@ export function findMatches(regex: RegExp, input: string): MatchInfo[] {
     });
 
     if (matches.length >= MAX_MATCHES) break;
-    // Zero-length match: advance manually or exec never terminates.
-    if (match[0] === '') re.lastIndex++;
+    // Zero-length match: advance manually or exec never terminates. In unicode
+    // mode step over the whole code point: landing inside a surrogate pair makes
+    // exec snap back and report the same match again, up to the cap.
+    if (match[0] === '') re.lastIndex += unicode && (input.codePointAt(re.lastIndex) ?? 0) > 0xffff ? 2 : 1;
     if (!global) break;
   }
 
