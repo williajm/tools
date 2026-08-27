@@ -325,7 +325,8 @@ test('the test-file tool downloads a file of the exact size and shows its SHA-25
   const { readFileSync } = await import('node:fs');
   await page.goto('./file/');
 
-  // Three zero bytes: a size small enough to check byte for byte.
+  // Three zero bytes: a size small enough to check byte for byte. No hash by
+  // default: the row is absent rather than empty.
   await page.getByLabel('Unit').selectOption('B');
   await page.getByLabel('Size').fill('3');
   await page.getByRole('button', { name: 'Zero bytes' }).click();
@@ -335,6 +336,14 @@ test('the test-file tool downloads a file of the exact size and shows its SHA-25
   expect(download.suggestedFilename()).toBe('zeros-3B.bin');
   let data = readFileSync((await download.path())!);
   expect([...data]).toEqual([0, 0, 0]);
+  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.locator('.field__label', { hasText: 'SHA-256' })).toHaveCount(0);
+
+  // Opt in to the digest.
+  await page.getByLabel('Compute SHA-256').check();
+  downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Generate & download' }).click();
+  await downloadPromise;
   await expect(page.getByText(createHash('sha256').update(data).digest('hex'))).toBeVisible();
 
   // Random bytes spanning several internal chunks, with a chosen name.

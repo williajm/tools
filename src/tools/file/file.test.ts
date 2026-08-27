@@ -50,8 +50,14 @@ describe('sizes', () => {
 });
 
 describe('generateFile', () => {
+  it('skips the digest unless asked, since it dominates the build time', async () => {
+    const { blob, sha256 } = await generateFile(3, 'zeros');
+    expect(blob.size).toBe(3);
+    expect(sha256).toBeNull();
+  });
+
   it('produces zero bytes of exactly the requested length with the right digest', async () => {
-    const { blob, bytes, sha256 } = await generateFile(3, 'zeros');
+    const { blob, bytes, sha256 } = await generateFile(3, 'zeros', { sha256: true });
     const data = new Uint8Array(await blob.arrayBuffer());
     expect(bytes).toBe(3);
     expect(data).toEqual(new Uint8Array([0, 0, 0]));
@@ -62,7 +68,7 @@ describe('generateFile', () => {
     // 2 MiB + 3: spans two full 1 MiB chunks plus a remainder, and each chunk
     // needs several 64 KiB getRandomValues calls.
     const size = 2 * 1024 * 1024 + 3;
-    const { blob, sha256 } = await generateFile(size, 'random');
+    const { blob, sha256 } = await generateFile(size, 'random', { sha256: true });
     const data = new Uint8Array(await blob.arrayBuffer());
     expect(data).toHaveLength(size);
     expect(sha256).toBe(nodeSha256(data));
@@ -73,14 +79,14 @@ describe('generateFile', () => {
 
   it('hashes multi-chunk zero files correctly', async () => {
     const size = 3 * 1024 * 1024 + 1;
-    const { blob, sha256 } = await generateFile(size, 'zeros');
+    const { blob, sha256 } = await generateFile(size, 'zeros', { sha256: true });
     expect(blob.size).toBe(size);
     expect(sha256).toBe(nodeSha256(new Uint8Array(size)));
   });
 
   it('reports progress up to the full size', async () => {
     const seen: number[] = [];
-    await generateFile(2 * 1024 * 1024 + 1, 'zeros', (done) => seen.push(done));
+    await generateFile(2 * 1024 * 1024 + 1, 'zeros', { onProgress: (done) => seen.push(done) });
     expect(seen).toEqual([1024 * 1024, 2 * 1024 * 1024, 2 * 1024 * 1024 + 1]);
   });
 
