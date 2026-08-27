@@ -218,6 +218,21 @@ export function generate(options: Options): string {
   return blocks.join('\n\n');
 }
 
+/**
+ * How much of a `heavyLayout` script's output the page renders. Measured in
+ * headless Chromium (2026-08): at 20,000 characters the worst case, Japanese,
+ * lays out in ~350ms; Thai, Korean, Hebrew and Devanagari in under 60ms. At
+ * 50,000 Japanese is close to a second, and the full output takes minutes.
+ */
+export const PREVIEW_CHARS = 20000;
+
+/** The first PREVIEW_CHARS UTF-16 units of `text`, never splitting a surrogate pair. */
+export function preview(text: string): string {
+  if (text.length <= PREVIEW_CHARS) return text;
+  const cut = /[\uD800-\uDBFF]/.test(text[PREVIEW_CHARS - 1]!) ? PREVIEW_CHARS - 1 : PREVIEW_CHARS;
+  return text.slice(0, cut);
+}
+
 /** All edge-case strings, one per line, for pasting into a test fixture. */
 export function generateEdgeCases(): string {
   return EDGE_CASES.map((e) => e.value).join('\n');

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { generate, MAX_COUNT, placeholderImage, type Options } from './generate.ts';
+import { generate, MAX_COUNT, PREVIEW_CHARS, placeholderImage, preview, type Options } from './generate.ts';
 import { SCRIPTS } from './scripts.ts';
 import { EDGE_CASES } from './edge.ts';
 import { makeRng } from './rng.ts';
@@ -304,5 +304,19 @@ describe('byte mode hits the budget exactly', () => {
       const out = generate({ script: 'japanese', unit: 'characters', count, format: 'text', seed: 's', classicOpening: false });
       expect([...out]).toHaveLength(count);
     }
+  });
+});
+
+describe('preview', () => {
+  it('returns short text unchanged', () => {
+    expect(preview('abc')).toBe('abc');
+  });
+
+  it('cuts at the limit without splitting a surrogate pair', () => {
+    const exact = 'x'.repeat(PREVIEW_CHARS);
+    expect(preview(exact + 'tail')).toBe(exact);
+    // An astral character straddling the cut is dropped whole, not halved.
+    const straddling = 'x'.repeat(PREVIEW_CHARS - 1) + '😀' + 'tail';
+    expect(preview(straddling)).toBe('x'.repeat(PREVIEW_CHARS - 1));
   });
 });

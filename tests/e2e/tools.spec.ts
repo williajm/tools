@@ -303,3 +303,19 @@ test('lorem downloads the output as a file named for its format', async ({ page 
   const { readFileSync } = await import('node:fs');
   expect(readFileSync(path, 'utf8').split(' ')).toHaveLength(12);
 });
+
+test('lorem previews a heavy-layout script but downloads all of it', async ({ page }) => {
+  await page.goto('./lorem/');
+  await page.getByLabel('Script').selectOption('devanagari');
+  await page.getByLabel('Unit').selectOption('words');
+  await page.getByLabel('Count').fill('200000');
+
+  // Regression: rendering 200,000 words of Devanagari took Chromium ~3 minutes.
+  await expect(page.getByText(/Showing the first 20,000 characters/)).toBeVisible();
+  expect((await page.locator('.output').textContent())!.length).toBeLessThanOrEqual(20000);
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download' }).click();
+  const { readFileSync } = await import('node:fs');
+  expect(readFileSync((await (await downloadPromise).path())!, 'utf8').split(' ')).toHaveLength(200000);
+});

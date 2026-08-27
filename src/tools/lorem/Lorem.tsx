@@ -4,7 +4,7 @@ import { CopyButton } from '@shared/components/CopyButton.tsx';
 import { DownloadButton } from '@shared/components/DownloadButton.tsx';
 import { Segmented } from '@shared/components/Segmented.tsx';
 import { useHashState } from '@shared/hooks/useHashState.ts';
-import { FORMATS, MAX_COUNT, UNITS, generate, placeholderImage, type Format, type Unit } from './generate.ts';
+import { FORMATS, MAX_COUNT, UNITS, generate, placeholderImage, preview, type Format, type Unit } from './generate.ts';
 import { SCRIPTS, scriptById, type ScriptId } from './scripts.ts';
 import { EDGE_CASES } from './edge.ts';
 import {
@@ -102,6 +102,11 @@ export function Lorem() {
         : '',
     [state.mode, state.script, state.unit, state.count, state.format, state.seed, state.classicOpening],
   );
+
+  // Generation is milliseconds for every script; it is the browser laying out
+  // some of them that freezes the tab, so only what is rendered is capped.
+  const shown = scriptDef.heavyLayout ? preview(textOutput) : textOutput;
+  const truncated = shown.length < textOutput.length;
 
   // Fixtures need faker, which is loaded on demand.
   const [rows, setRows] = useState<Row[]>([]);
@@ -251,8 +256,15 @@ export function Lorem() {
               <CopyButton value={textOutput} />
               <DownloadButton value={textOutput} {...downloadAs} />
             </div>
+            {truncated && (
+              <div class="note note--warn small">
+                Showing the first {[...shown].length.toLocaleString()} characters: the browser is
+                slow to lay out {scriptDef.name} text at this size. Copy and Download include the
+                full output.
+              </div>
+            )}
             <pre class="output" dir={scriptDef.rtl && state.format !== 'html' ? 'rtl' : 'ltr'}>
-              {textOutput}
+              {shown}
             </pre>
           </>
         )}
