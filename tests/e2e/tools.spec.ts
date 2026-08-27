@@ -354,7 +354,7 @@ test('the test-file tool downloads a file of the exact size and shows its SHA-25
 
 test('the test-file tool survives a fragment with values it does not know', async ({ page }) => {
   // Regression: an unknown unit made every limit NaN and disabled the button for good.
-  const fragment = btoa(encodeURIComponent(JSON.stringify({ size: 3, unit: 'GB', fill: 'ones', filename: '' })));
+  const fragment = btoa(encodeURIComponent(JSON.stringify({ size: 3, unit: 'TB', fill: 'ones', filename: '' })));
   await page.goto(`./file/#${fragment}`);
 
   await expect(page.getByLabel('Unit')).toHaveValue('MiB');

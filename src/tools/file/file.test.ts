@@ -11,6 +11,8 @@ describe('sizes', () => {
     expect(toBytes(1, 'KiB')).toBe(1024);
     expect(toBytes(2.5, 'MB')).toBe(2_500_000);
     expect(toBytes(10, 'MiB')).toBe(10_485_760);
+    expect(toBytes(1, 'GB')).toBe(1_000_000_000);
+    expect(toBytes(0.5, 'GiB')).toBe(536_870_912);
   });
 
   it('rounds fractional bytes', () => {
@@ -23,13 +25,17 @@ describe('sizes', () => {
     // Regression: flooring to 1073 MB made 1073.5 MB unreachable although it is under the limit.
     expect(maxFor('MB')).toBeCloseTo(1073.741824, 6);
     expect(toBytes(maxFor('MB'), 'MB')).toBe(MAX_BYTES);
+    // The gigabyte units exist so "1 GB" is one field, not "1000 MB"; the ceiling still binds.
+    expect(maxFor('GiB')).toBe(1);
+    expect(maxFor('GB')).toBeCloseTo(1.073741824, 9);
+    expect(toBytes(maxFor('GB'), 'GB')).toBe(MAX_BYTES);
   });
 
   it('normalises state a hand-edited URL could carry', () => {
     const good = { size: 2.5, unit: 'MB', fill: 'zeros' } as const;
     expect(normalise(good)).toEqual(good);
     // Each bad field falls back on its own; the others survive.
-    expect(normalise({ size: 3, unit: 'GB' as never, fill: 'zeros' })).toEqual({ size: 3, unit: DEFAULT_REQUEST.unit, fill: 'zeros' });
+    expect(normalise({ size: 3, unit: 'TB' as never, fill: 'zeros' })).toEqual({ size: 3, unit: DEFAULT_REQUEST.unit, fill: 'zeros' });
     expect(normalise({ size: 3, unit: 'B', fill: 'ones' as never })).toEqual({ size: 3, unit: 'B', fill: DEFAULT_REQUEST.fill });
     for (const size of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(normalise({ size, unit: 'B', fill: 'zeros' }).size).toBe(DEFAULT_REQUEST.size);

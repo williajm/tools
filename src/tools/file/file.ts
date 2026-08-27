@@ -26,9 +26,9 @@ export const FILL_NOTES: Record<Fill, string> = {
     'Compresses to almost nothing, so anything with compression in the path moves it in an instant. Fine for tripping a size check; useless for measuring throughput.',
 };
 
-export type SizeUnit = 'B' | 'KB' | 'MB' | 'KiB' | 'MiB';
+export type SizeUnit = 'B' | 'KB' | 'MB' | 'GB' | 'KiB' | 'MiB' | 'GiB';
 
-export const SIZE_UNITS: readonly SizeUnit[] = ['B', 'KB', 'MB', 'KiB', 'MiB'];
+export const SIZE_UNITS: readonly SizeUnit[] = ['B', 'KB', 'MB', 'GB', 'KiB', 'MiB', 'GiB'];
 
 /**
  * Decimal and binary units are both offered because limits are quoted in both,
@@ -39,8 +39,10 @@ export const UNIT_BYTES: Record<SizeUnit, number> = {
   B: 1,
   KB: 1000,
   MB: 1_000_000,
+  GB: 1_000_000_000,
   KiB: 1024,
   MiB: 1024 * 1024,
+  GiB: 1024 * 1024 * 1024,
 };
 
 /**
