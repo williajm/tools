@@ -54,6 +54,13 @@ export const TOOLS: Tool[] = [
     offline: true,
   },
   {
+    slug: 'file',
+    name: 'Test file',
+    blurb: 'A file of an exact size, random or zero-filled, with its SHA-256, for testing upload limits.',
+    category: 'Generate',
+    offline: true,
+  },
+  {
     slug: 'qr',
     name: 'QR code',
     blurb: 'Generate from text, WiFi, vCard, calendar or TOTP. Decode from an image or camera.',

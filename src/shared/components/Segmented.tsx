@@ -5,10 +5,11 @@ interface Props<T extends string> {
   label: string;
   /** Optional display names, keyed by option value. */
   names?: Partial<Record<T, string>>;
+  disabled?: boolean;
 }
 
 /** Mode switcher used by the multi-mode tools. */
-export function Segmented<T extends string>({ options, value, onChange, label, names }: Props<T>) {
+export function Segmented<T extends string>({ options, value, onChange, label, names, disabled }: Props<T>) {
   return (
     <div class="segmented" role="group" aria-label={label}>
       {options.map((opt) => (
@@ -16,6 +17,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, n
           key={opt}
           type="button"
           aria-pressed={opt === value}
+          disabled={disabled}
           onClick={() => onChange(opt)}
         >
           {names?.[opt] ?? opt}

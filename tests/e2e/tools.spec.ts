@@ -319,3 +319,63 @@ test('lorem previews a heavy-layout script but downloads all of it', async ({ pa
   const { readFileSync } = await import('node:fs');
   expect(readFileSync((await (await downloadPromise).path())!, 'utf8').split(' ')).toHaveLength(200000);
 });
+
+test('the test-file tool downloads a file of the exact size and shows its SHA-256', async ({ page }) => {
+  const { createHash } = await import('node:crypto');
+  const { readFileSync } = await import('node:fs');
+  await page.goto('./file/');
+
+  // Three zero bytes: a size small enough to check byte for byte.
+  await page.getByLabel('Unit').selectOption('B');
+  await page.getByLabel('Size').fill('3');
+  await page.getByRole('button', { name: 'Zero bytes' }).click();
+  let downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Generate & download' }).click();
+  let download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('zeros-3B.bin');
+  let data = readFileSync((await download.path())!);
+  expect([...data]).toEqual([0, 0, 0]);
+  await expect(page.getByText(createHash('sha256').update(data).digest('hex'))).toBeVisible();
+
+  // Random bytes spanning several internal chunks, with a chosen name.
+  await page.getByLabel('Unit').selectOption('MiB');
+  await page.getByLabel('Size').fill('2.5');
+  await page.getByRole('button', { name: 'Random bytes' }).click();
+  await page.getByLabel('Filename').fill('upload-probe.dat');
+  downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Generate & download' }).click();
+  download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('upload-probe.dat');
+  data = readFileSync((await download.path())!);
+  expect(data.length).toBe(2.5 * 1024 * 1024);
+  expect(data.some((b) => b !== 0)).toBe(true);
+  await expect(page.getByText(createHash('sha256').update(data).digest('hex'))).toBeVisible();
+});
+
+test('the test-file tool survives a fragment with values it does not know', async ({ page }) => {
+  // Regression: an unknown unit made every limit NaN and disabled the button for good.
+  const fragment = btoa(encodeURIComponent(JSON.stringify({ size: 3, unit: 'GB', fill: 'ones', filename: '' })));
+  await page.goto(`./file/#${fragment}`);
+
+  await expect(page.getByLabel('Unit')).toHaveValue('MiB');
+  await expect(page.getByRole('button', { name: 'Random bytes' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Generate & download' })).toBeEnabled();
+});
+
+test('the test-file tool locks its inputs while a file is being built', async ({ page }) => {
+  await page.goto('./file/');
+  await page.getByLabel('Unit').selectOption('MiB');
+  await page.getByLabel('Size').fill('256');
+
+  // Regression: the controls stayed live during a run, so changing the size
+  // made the progress bar describe a job that was not the one running.
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Generate & download' }).click();
+  await expect(page.getByLabel('Size')).toBeDisabled();
+  await expect(page.getByLabel('Unit')).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Zero bytes' })).toBeDisabled();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('max', String(256 * 1024 * 1024));
+
+  expect((await downloadPromise).suggestedFilename()).toBe('random-256MiB.bin');
+  await expect(page.getByLabel('Size')).toBeEnabled();
+});
