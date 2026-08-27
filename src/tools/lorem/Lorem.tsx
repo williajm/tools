@@ -3,7 +3,7 @@ import { ToolShell } from '@shared/components/ToolShell.tsx';
 import { CopyButton } from '@shared/components/CopyButton.tsx';
 import { Segmented } from '@shared/components/Segmented.tsx';
 import { useHashState } from '@shared/hooks/useHashState.ts';
-import { FORMATS, UNITS, generate, placeholderImage, type Format, type Unit } from './generate.ts';
+import { FORMATS, MAX_COUNT, UNITS, generate, placeholderImage, type Format, type Unit } from './generate.ts';
 import { SCRIPTS, scriptById, type ScriptId } from './scripts.ts';
 import { EDGE_CASES } from './edge.ts';
 import {
@@ -77,6 +77,7 @@ export function Lorem() {
 
   const scriptDef = scriptById(state.script);
   const isLengthUnit = state.unit === 'characters' || state.unit === 'bytes';
+  const maxCount = MAX_COUNT[state.unit];
 
   const textOutput = useMemo(
     () =>
@@ -165,7 +166,11 @@ export function Lorem() {
                 <span class="field__label">Unit</span>
                 <select
                   value={state.unit}
-                  onChange={(e) => set('unit', (e.target as HTMLSelectElement).value as Unit)}
+                  onChange={(e) => {
+                    // Each unit has its own ceiling; keep the count inside the new one.
+                    const unit = (e.target as HTMLSelectElement).value as Unit;
+                    setState({ ...state, unit, count: Math.min(state.count, MAX_COUNT[unit]) });
+                  }}
                 >
                   {UNITS.map((u) => (
                     <option key={u} value={u}>
@@ -180,9 +185,14 @@ export function Lorem() {
                 <input
                   type="number"
                   min={1}
-                  max={isLengthUnit ? 100000 : 500}
+                  max={maxCount}
+                  title={`Up to ${maxCount.toLocaleString()} ${UNIT_NAMES[state.unit].toLowerCase()}`}
                   value={state.count}
-                  onInput={(e) => set('count', Number((e.target as HTMLInputElement).value))}
+                  // Clamp on entry rather than at generation time: the field never
+                  // shows a number the output will not honour.
+                  onInput={(e) =>
+                    set('count', Math.min(Number((e.target as HTMLInputElement).value), maxCount))
+                  }
                 />
               </label>
 

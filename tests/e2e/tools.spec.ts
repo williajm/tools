@@ -267,3 +267,21 @@ test('a namespaced XML document can be queried by prefix', async ({ page }) => {
   await expect(page.locator('table.data')).toContainText('found');
   expect(problems).toEqual([]);
 });
+
+test('lorem generates a large word count and clamps the field to each unit ceiling', async ({ page }) => {
+  await page.goto('./lorem/');
+  await page.getByLabel('Unit').selectOption('words');
+  const count = page.getByLabel('Count');
+
+  // Regression: one 500-block ceiling covered every unit, so 10,000 words came back as 500.
+  await count.fill('10000');
+  await expect(page.locator('.output')).toHaveText(/^(\S+ ){9999}\S+$/);
+
+  // A number the generator would not honour cannot be entered: it clamps as you type.
+  await count.fill('99999');
+  await expect(count).toHaveValue('50000');
+
+  // Switching to a unit with a lower ceiling pulls the count down with it.
+  await page.getByLabel('Unit').selectOption('paragraphs');
+  await expect(count).toHaveValue('500');
+});

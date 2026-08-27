@@ -134,27 +134,34 @@ function asMarkdown(blocks: string[], unit: Unit): string {
 }
 
 /**
- * Block counts and length budgets need different ceilings: 500 paragraphs is
- * already unreasonable, whereas 20000 characters is a legitimate request when
- * you are testing a TEXT column limit.
+ * Per-unit ceilings. The count field clamps to these, so a request that would
+ * be silently cut short cannot be entered in the first place; generate() clamps
+ * too for anything that bypasses the field, such as a hand-edited URL hash.
+ *
+ * Blocks and length budgets need different ceilings: 500 paragraphs is already
+ * unreasonable, whereas 50,000 words or 100,000 characters is a legitimate
+ * request when you are testing a TEXT column limit or a long-document renderer.
  */
-const MAX_BLOCKS = 500;
-const MAX_LENGTH = 100000;
+export const MAX_COUNT: Readonly<Record<Unit, number>> = {
+  paragraphs: 500,
+  sentences: 5000,
+  words: 50000,
+  'list-items': 1000,
+  characters: 100000,
+  bytes: 100000,
+};
 
 export function generate(options: Options): string {
   const { script, unit, format, seed, classicOpening } = options;
-  const requested = Math.floor(options.count) || 1;
+  const count = Math.max(1, Math.min(MAX_COUNT[unit], Math.floor(options.count) || 1));
   const rng = makeRng(seed);
   const def = scriptById(script);
 
   if (unit === 'characters' || unit === 'bytes') {
     // Exact-length modes ignore format: the point is a precise budget, for
     // testing column limits and meta-description truncation.
-    const limit = Math.max(1, Math.min(MAX_LENGTH, requested));
-    return padTo(rng, script, limit, unit);
+    return padTo(rng, script, count, unit);
   }
-
-  const count = Math.max(1, Math.min(MAX_BLOCKS, requested));
 
   /**
    * The classic opening is content, so it counts towards what was asked for.

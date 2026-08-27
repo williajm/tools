@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { generate, placeholderImage, type Options } from './generate.ts';
+import { generate, MAX_COUNT, placeholderImage, type Options } from './generate.ts';
 import { SCRIPTS } from './scripts.ts';
 import { EDGE_CASES } from './edge.ts';
 import { makeRng } from './rng.ts';
@@ -90,10 +90,19 @@ describe('units', () => {
     expect(out.split('\n\n')).toHaveLength(4);
   });
 
-  it('clamps absurd counts', () => {
+  it('produces the requested number of words well past the paragraph ceiling', () => {
+    // Regression: one 500-block ceiling covered every unit, so 10,000 words
+    // silently came back as 500.
+    const out = generate({ ...base, unit: 'words', count: 10000 });
+    expect(out.split(' ')).toHaveLength(10000);
+  });
+
+  it('clamps absurd counts to the ceiling for that unit', () => {
     expect(generate({ ...base, unit: 'words', count: 0 }).length).toBeGreaterThan(0);
-    const many = generate({ ...base, unit: 'words', count: 99999 });
-    expect(many.split(/\s+/).length).toBeLessThanOrEqual(500);
+    expect(generate({ ...base, unit: 'words', count: 999999 }).split(' ')).toHaveLength(MAX_COUNT.words);
+    expect(generate({ ...base, unit: 'paragraphs', count: 999999 }).split('\n\n')).toHaveLength(
+      MAX_COUNT.paragraphs,
+    );
   });
 });
 
