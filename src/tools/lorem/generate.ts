@@ -60,17 +60,15 @@ function trimTo(text: string, limit: number, mode: 'characters' | 'bytes'): stri
     return points.length <= limit ? text : points.slice(0, limit).join('');
   }
 
-  const encoder = new TextEncoder();
-  if (encoder.encode(text).length <= limit) return text;
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length <= limit) return text;
 
-  let out = '';
-  let used = 0;
-  for (const ch of text) {
-    const size = encoder.encode(ch).length;
-    if (used + size > limit) break;
-    out += ch;
-    used += size;
-  }
+  // Cut at the budget, then back off any UTF-8 continuation bytes (10xxxxxx)
+  // so a multi-byte code point is never split. Encoding once and slicing is
+  // O(n); encoding character by character took ~400ms at the ceiling.
+  let used = limit;
+  while (used > 0 && (bytes[used]! & 0xc0) === 0x80) used--;
+  let out = new TextDecoder().decode(bytes.subarray(0, used));
 
   /**
    * Fill the remainder with single-byte characters so the budget is met exactly.
@@ -94,13 +92,18 @@ function trimTo(text: string, limit: number, mode: 'characters' | 'bytes'): stri
 
 function padTo(rng: Rng, script: ScriptId, limit: number, mode: 'characters' | 'bytes'): string {
   // Build well past the target, then trim back — cheaper than measuring per word.
-  let text = '';
+  // Measure each chunk as it is added rather than the whole buffer each time,
+  // which was quadratic and noticeable at a few hundred thousand bytes.
   const measure = (s: string) =>
     mode === 'characters' ? [...s].length : new TextEncoder().encode(s).length;
 
+  let text = '';
+  let used = 0;
   let guard = 0;
-  while (measure(text) < limit && guard++ < 10000) {
-    text += (text ? ' ' : '') + paragraph(rng, script, 4);
+  while (used < limit && guard++ < 10000) {
+    const chunk = (text ? ' ' : '') + paragraph(rng, script, 4);
+    text += chunk;
+    used += measure(chunk);
   }
   return trimTo(text, limit, mode);
 }
@@ -134,27 +137,34 @@ function asMarkdown(blocks: string[], unit: Unit): string {
 }
 
 /**
- * Block counts and length budgets need different ceilings: 500 paragraphs is
- * already unreasonable, whereas 20000 characters is a legitimate request when
- * you are testing a TEXT column limit.
+ * Per-unit ceilings. The count field clamps to these, so a request that would
+ * be silently cut short cannot be entered in the first place; generate() clamps
+ * too for anything that bypasses the field, such as a hand-edited URL hash.
+ *
+ * Blocks and length budgets need different ceilings: 2,000 paragraphs is already
+ * unreasonable, whereas 200,000 words or 400,000 characters is a legitimate
+ * request when you are testing a TEXT column limit or a long-document renderer.
  */
-const MAX_BLOCKS = 500;
-const MAX_LENGTH = 100000;
+export const MAX_COUNT: Readonly<Record<Unit, number>> = {
+  paragraphs: 2000,
+  sentences: 20000,
+  words: 200000,
+  'list-items': 4000,
+  characters: 400000,
+  bytes: 400000,
+};
 
 export function generate(options: Options): string {
   const { script, unit, format, seed, classicOpening } = options;
-  const requested = Math.floor(options.count) || 1;
+  const count = Math.max(1, Math.min(MAX_COUNT[unit], Math.floor(options.count) || 1));
   const rng = makeRng(seed);
   const def = scriptById(script);
 
   if (unit === 'characters' || unit === 'bytes') {
     // Exact-length modes ignore format: the point is a precise budget, for
     // testing column limits and meta-description truncation.
-    const limit = Math.max(1, Math.min(MAX_LENGTH, requested));
-    return padTo(rng, script, limit, unit);
+    return padTo(rng, script, count, unit);
   }
-
-  const count = Math.max(1, Math.min(MAX_BLOCKS, requested));
 
   /**
    * The classic opening is content, so it counts towards what was asked for.
@@ -206,6 +216,21 @@ export function generate(options: Options): string {
   if (format === 'html') return asHtml(blocks, unit, def.rtl);
   if (format === 'markdown') return asMarkdown(blocks, unit);
   return blocks.join('\n\n');
+}
+
+/**
+ * How much of a `heavyLayout` script's output the page renders. Measured in
+ * headless Chromium (2026-08): at 20,000 characters the worst case, Japanese,
+ * lays out in ~350ms; Thai, Korean, Hebrew and Devanagari in under 60ms. At
+ * 50,000 Japanese is close to a second, and the full output takes minutes.
+ */
+export const PREVIEW_CHARS = 20000;
+
+/** The first PREVIEW_CHARS UTF-16 units of `text`, never splitting a surrogate pair. */
+export function preview(text: string): string {
+  if (text.length <= PREVIEW_CHARS) return text;
+  const cut = /[\uD800-\uDBFF]/.test(text[PREVIEW_CHARS - 1]!) ? PREVIEW_CHARS - 1 : PREVIEW_CHARS;
+  return text.slice(0, cut);
 }
 
 /** All edge-case strings, one per line, for pasting into a test fixture. */

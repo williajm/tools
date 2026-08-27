@@ -28,6 +28,16 @@ export interface ScriptDef {
   rtl: boolean;
   /** No spaces between words, so wrapping must break mid-run. */
   unspaced: boolean;
+  /**
+   * Chromium's line breaking or shaping is superlinear in run length for this
+   * script: 200,000 words of Thai or Devanagari took ~3 minutes to lay out and
+   * froze the tab, Hebrew and Korean over a minute, and Japanese costs ~17µs
+   * per character even at small sizes. The page renders a preview of these
+   * instead of the whole output (see PREVIEW_CHARS in generate.ts); Copy and
+   * Download still carry everything. Latin, Cyrillic, Greek, Arabic and Han
+   * lay out 1.3 MB in under 200 ms, so they are shown in full.
+   */
+  heavyLayout: boolean;
   words: readonly string[];
   note: string;
 }
@@ -38,6 +48,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Latin (lorem ipsum)',
     rtl: false,
     unspaced: false,
+    heavyLayout: false,
     note: 'The classic. Baseline for comparison.',
     words: [
       'lorem', 'ipsum', 'dolor', 'sit', 'amet', 'consectetur', 'adipiscing', 'elit', 'sed', 'do',
@@ -54,6 +65,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Latin (accented)',
     rtl: false,
     unspaced: false,
+    heavyLayout: false,
     note: 'Diacritics and ligatures. Catches font fallback and normalisation bugs.',
     words: [
       'café', 'naïve', 'résumé', 'jalapeño', 'Ångström', 'Zürich', 'façade', 'crème', 'brûlée',
@@ -66,6 +78,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Cyrillic',
     rtl: false,
     unspaced: false,
+    heavyLayout: false,
     note: 'Wider average word length than Latin. Good for testing truncation.',
     words: [
       'привет', 'мир', 'текст', 'пример', 'страница', 'документ', 'значение', 'система',
@@ -78,6 +91,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Greek',
     rtl: false,
     unspaced: false,
+    heavyLayout: false,
     note: 'Distinct casing rules — final sigma changes form.',
     words: [
       'γεια', 'κόσμος', 'κείμενο', 'παράδειγμα', 'σελίδα', 'έγγραφο', 'σύστημα', 'ανάπτυξη',
@@ -89,6 +103,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Arabic (RTL)',
     rtl: true,
     unspaced: false,
+    heavyLayout: false,
     note: 'Right to left, and letters change shape by position. Breaks naive rendering.',
     words: [
       'مرحبا', 'عالم', 'نص', 'مثال', 'صفحة', 'وثيقة', 'نظام', 'تطوير', 'برنامج', 'حاسوب',
@@ -100,6 +115,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Hebrew (RTL)',
     rtl: true,
     unspaced: false,
+    heavyLayout: true,
     note: 'Right to left with final letter forms.',
     words: [
       'שלום', 'עולם', 'טקסט', 'דוגמה', 'עמוד', 'מסמך', 'מערכת', 'פיתוח', 'תוכנה', 'מחשב',
@@ -111,6 +127,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Chinese (Han)',
     rtl: false,
     unspaced: true,
+    heavyLayout: false,
     note: 'No spaces, full-width glyphs. Character counts and width diverge sharply.',
     words: [
       '你好', '世界', '文本', '例子', '页面', '文档', '系统', '开发', '程序', '计算机',
@@ -122,6 +139,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Japanese',
     rtl: false,
     unspaced: true,
+    heavyLayout: true,
     note: 'Mixes kanji, hiragana and katakana with no spaces.',
     words: [
       'こんにちは', '世界', 'テキスト', '例', 'ページ', '文書', 'システム', '開発', 'プログラム',
@@ -133,6 +151,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Korean',
     rtl: false,
     unspaced: false,
+    heavyLayout: true,
     note: 'Hangul syllable blocks. Spaced, but glyphs are full-width.',
     words: [
       '안녕하세요', '세계', '텍스트', '예시', '페이지', '문서', '시스템', '개발', '프로그램',
@@ -144,6 +163,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Devanagari (Hindi)',
     rtl: false,
     unspaced: false,
+    heavyLayout: true,
     note: 'Marks stack above and below the baseline — line height bugs show up here.',
     words: [
       'नमस्ते', 'दुनिया', 'पाठ', 'उदाहरण', 'पृष्ठ', 'दस्तावेज़', 'प्रणाली', 'विकास', 'कार्यक्रम',
@@ -155,6 +175,7 @@ export const SCRIPTS: readonly ScriptDef[] = [
     name: 'Thai',
     rtl: false,
     unspaced: true,
+    heavyLayout: true,
     note: 'No spaces between words and no obvious break points. The hardest wrapping case.',
     words: [
       'สวัสดี', 'โลก', 'ข้อความ', 'ตัวอย่าง', 'หน้า', 'เอกสาร', 'ระบบ', 'การพัฒนา', 'โปรแกรม',

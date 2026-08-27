@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { ToolShell } from '@shared/components/ToolShell.tsx';
 import { CopyButton } from '@shared/components/CopyButton.tsx';
+import { DownloadButton } from '@shared/components/DownloadButton.tsx';
 import { Segmented } from '@shared/components/Segmented.tsx';
 import { useHashState } from '@shared/hooks/useHashState.ts';
-import { FORMATS, UNITS, generate, placeholderImage, type Format, type Unit } from './generate.ts';
+import { FORMATS, MAX_COUNT, UNITS, generate, placeholderImage, preview, type Format, type Unit } from './generate.ts';
 import { SCRIPTS, scriptById, type ScriptId } from './scripts.ts';
 import { EDGE_CASES } from './edge.ts';
 import {
@@ -24,6 +25,12 @@ const MODE_NAMES: Record<Mode, string> = {
   edge: 'Edge cases',
   fixtures: 'Entity fixtures',
   images: 'Placeholder images',
+};
+
+const DOWNLOAD_AS: Record<Format, { filename: string; type: string }> = {
+  text: { filename: 'lorem.txt', type: 'text/plain' },
+  html: { filename: 'lorem.html', type: 'text/html' },
+  markdown: { filename: 'lorem.md', type: 'text/markdown' },
 };
 
 const UNIT_NAMES: Record<Unit, string> = {
@@ -77,6 +84,9 @@ export function Lorem() {
 
   const scriptDef = scriptById(state.script);
   const isLengthUnit = state.unit === 'characters' || state.unit === 'bytes';
+  const maxCount = MAX_COUNT[state.unit];
+  // Length units ignore the format, so they always save as plain text.
+  const downloadAs = DOWNLOAD_AS[isLengthUnit ? 'text' : state.format];
 
   const textOutput = useMemo(
     () =>
@@ -92,6 +102,11 @@ export function Lorem() {
         : '',
     [state.mode, state.script, state.unit, state.count, state.format, state.seed, state.classicOpening],
   );
+
+  // Generation is milliseconds for every script; it is the browser laying out
+  // some of them that freezes the tab, so only what is rendered is capped.
+  const shown = scriptDef.heavyLayout ? preview(textOutput) : textOutput;
+  const truncated = shown.length < textOutput.length;
 
   // Fixtures need faker, which is loaded on demand.
   const [rows, setRows] = useState<Row[]>([]);
@@ -165,7 +180,11 @@ export function Lorem() {
                 <span class="field__label">Unit</span>
                 <select
                   value={state.unit}
-                  onChange={(e) => set('unit', (e.target as HTMLSelectElement).value as Unit)}
+                  onChange={(e) => {
+                    // Each unit has its own ceiling; keep the count inside the new one.
+                    const unit = (e.target as HTMLSelectElement).value as Unit;
+                    setState({ ...state, unit, count: Math.min(state.count, MAX_COUNT[unit]) });
+                  }}
                 >
                   {UNITS.map((u) => (
                     <option key={u} value={u}>
@@ -180,9 +199,14 @@ export function Lorem() {
                 <input
                   type="number"
                   min={1}
-                  max={isLengthUnit ? 100000 : 500}
+                  max={maxCount}
+                  title={`Up to ${maxCount.toLocaleString()} ${UNIT_NAMES[state.unit].toLowerCase()}`}
                   value={state.count}
-                  onInput={(e) => set('count', Number((e.target as HTMLInputElement).value))}
+                  // Clamp on entry rather than at generation time: the field never
+                  // shows a number the output will not honour.
+                  onInput={(e) =>
+                    set('count', Math.min(Number((e.target as HTMLInputElement).value), maxCount))
+                  }
                 />
               </label>
 
@@ -230,9 +254,17 @@ export function Lorem() {
                 {[...textOutput].length} chars · {new TextEncoder().encode(textOutput).length} bytes
               </span>
               <CopyButton value={textOutput} />
+              <DownloadButton value={textOutput} {...downloadAs} />
             </div>
+            {truncated && (
+              <div class="note note--warn small">
+                Showing the first {[...shown].length.toLocaleString()} characters: the browser is
+                slow to lay out {scriptDef.name} text at this size. Copy and Download include the
+                full output.
+              </div>
+            )}
             <pre class="output" dir={scriptDef.rtl && state.format !== 'html' ? 'rtl' : 'ltr'}>
-              {textOutput}
+              {shown}
             </pre>
           </>
         )}
