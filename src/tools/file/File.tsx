@@ -24,9 +24,10 @@ import {
 interface State extends Request {
   /** Empty means "use the suggested name". */
   filename: string;
+  sha256: boolean;
 }
 
-const INITIAL: State = { ...DEFAULT_REQUEST, filename: '' };
+const INITIAL: State = { ...DEFAULT_REQUEST, filename: '', sha256: false };
 
 type Phase = 'idle' | 'working' | 'done' | 'failed';
 
@@ -79,7 +80,10 @@ export function TestFile() {
     setResult(null);
     setError(null);
     try {
-      const generated = await generateFile(thisJob.bytes, fill, setProgress);
+      const generated = await generateFile(thisJob.bytes, fill, {
+        sha256: state.sha256,
+        onProgress: setProgress,
+      });
       saveBlob(generated.blob, thisJob.filename);
       setResult({ ...generated, filename: thisJob.filename });
       setPhase('done');
@@ -150,6 +154,18 @@ export function TestFile() {
               onInput={(e) => set('filename', (e.target as HTMLInputElement).value)}
             />
           </label>
+          <label
+            class="checkbox"
+            title="Hashing runs in JavaScript and roughly doubles the build time at large sizes"
+          >
+            <input
+              type="checkbox"
+              checked={state.sha256}
+              disabled={busy}
+              onChange={(e) => set('sha256', (e.target as HTMLInputElement).checked)}
+            />
+            Compute SHA-256
+          </label>
           <button type="button" class="primary" disabled={!canGenerate} onClick={run}>
             {busy ? 'Generating…' : 'Generate & download'}
           </button>
@@ -170,12 +186,16 @@ export function TestFile() {
           <div class="stack stack--tight">
             <div class="note note--ok small">
               Saved <span class="mono">{result.filename}</span> — {result.bytes.toLocaleString()} bytes.
-              Upload it, hash what the server stored, and compare.
+              {result.sha256 && ' Upload it, hash what the server stored, and compare.'}
             </div>
             <div class="row">
-              <span class="field__label">SHA-256</span>
-              <span class="mono small wrap-anywhere">{result.sha256}</span>
-              <CopyButton value={result.sha256} />
+              {result.sha256 && (
+                <>
+                  <span class="field__label">SHA-256</span>
+                  <span class="mono small wrap-anywhere">{result.sha256}</span>
+                  <CopyButton value={result.sha256} />
+                </>
+              )}
               <button type="button" onClick={() => saveBlob(result.blob, result.filename)} title="If the browser blocked the automatic download">
                 Save again
               </button>

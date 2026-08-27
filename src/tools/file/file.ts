@@ -95,8 +95,17 @@ export function suggestedFilename(size: number, unit: SizeUnit, fill: Fill): str
 export interface Generated {
   blob: Blob;
   bytes: number;
-  /** Hex digest of the whole file, for checking what a server stored. */
-  sha256: string;
+  /** Hex digest of the whole file, for checking what a server stored. Null unless asked for. */
+  sha256: string | null;
+}
+
+export interface GenerateOptions {
+  /**
+   * Off by default: hashing runs in JavaScript at ~250 MB/s, which is most of
+   * the build time at large sizes, and most runs only need the size.
+   */
+  sha256?: boolean;
+  onProgress?: (doneBytes: number) => void;
 }
 
 const CHUNK = 1024 * 1024;
@@ -115,13 +124,13 @@ const RANDOM_CALL_MAX = 65536;
 export async function generateFile(
   bytes: number,
   fill: Fill,
-  onProgress?: (doneBytes: number) => void,
+  { sha256: wantHash = false, onProgress }: GenerateOptions = {},
 ): Promise<Generated> {
   if (!Number.isInteger(bytes) || bytes < 1 || bytes > MAX_BYTES) {
     throw new RangeError(`Size must be a whole number of bytes from 1 to ${MAX_BYTES.toLocaleString()}.`);
   }
 
-  const hash = sha256.create();
+  const hash = wantHash ? sha256.create() : null;
   const parts: Blob[] = [];
   // Zero chunks are identical, so one Blob serves every full chunk.
   const zeros = new Uint8Array(CHUNK);
@@ -131,14 +140,14 @@ export async function generateFile(
   while (done < bytes) {
     const size = Math.min(CHUNK, bytes - done);
     if (fill === 'zeros') {
-      hash.update(zeros.subarray(0, size));
+      hash?.update(zeros.subarray(0, size));
       parts.push(size === CHUNK ? zeroBlob : zeroBlob.slice(0, size));
     } else {
       const chunk = new Uint8Array(size);
       for (let at = 0; at < size; at += RANDOM_CALL_MAX) {
         crypto.getRandomValues(chunk.subarray(at, Math.min(at + RANDOM_CALL_MAX, size)));
       }
-      hash.update(chunk);
+      hash?.update(chunk);
       parts.push(new Blob([chunk]));
     }
     done += size;
@@ -150,6 +159,6 @@ export async function generateFile(
   return {
     blob: new Blob(parts, { type: 'application/octet-stream' }),
     bytes,
-    sha256: bytesToHex(hash.digest()),
+    sha256: hash ? bytesToHex(hash.digest()) : null,
   };
 }
