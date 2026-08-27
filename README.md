@@ -14,10 +14,10 @@ are simultaneously true.
 
 ## The tools
 
-Thirteen of them, grouped into one page per area: encoding, UUID and IDs, hash
-and HMAC, timestamps and timezones, lorem and test data, QR codes, JWT, a JSON
-toolkit, text diff, CIDR and subnets, a regex tester, XPath and CSS selectors,
-and a pairwise test matrix generator.
+Fourteen of them, grouped into one page per area: encoding, UUID and IDs, hash
+and HMAC, timestamps and timezones, lorem and test data, test files of an exact
+size, QR codes, JWT, a JSON toolkit, text diff, CIDR and subnets, a regex
+tester, XPath and CSS selectors, and a pairwise test matrix generator.
 
 The home page lists all of them, grouped by category. That grid is the whole
 navigation — there is no search box, no command palette and no recents list.
