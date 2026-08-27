@@ -60,17 +60,15 @@ function trimTo(text: string, limit: number, mode: 'characters' | 'bytes'): stri
     return points.length <= limit ? text : points.slice(0, limit).join('');
   }
 
-  const encoder = new TextEncoder();
-  if (encoder.encode(text).length <= limit) return text;
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length <= limit) return text;
 
-  let out = '';
-  let used = 0;
-  for (const ch of text) {
-    const size = encoder.encode(ch).length;
-    if (used + size > limit) break;
-    out += ch;
-    used += size;
-  }
+  // Cut at the budget, then back off any UTF-8 continuation bytes (10xxxxxx)
+  // so a multi-byte code point is never split. Encoding once and slicing is
+  // O(n); encoding character by character took ~400ms at the ceiling.
+  let used = limit;
+  while (used > 0 && (bytes[used]! & 0xc0) === 0x80) used--;
+  let out = new TextDecoder().decode(bytes.subarray(0, used));
 
   /**
    * Fill the remainder with single-byte characters so the budget is met exactly.
