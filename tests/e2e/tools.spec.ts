@@ -278,10 +278,28 @@ test('lorem generates a large word count and clamps the field to each unit ceili
   await expect(page.locator('.output')).toHaveText(/^(\S+ ){9999}\S+$/);
 
   // A number the generator would not honour cannot be entered: it clamps as you type.
-  await count.fill('99999');
-  await expect(count).toHaveValue('50000');
+  await count.fill('999999');
+  await expect(count).toHaveValue('200000');
 
   // Switching to a unit with a lower ceiling pulls the count down with it.
   await page.getByLabel('Unit').selectOption('paragraphs');
-  await expect(count).toHaveValue('500');
+  await expect(count).toHaveValue('2000');
+});
+
+test('lorem downloads the output as a file named for its format', async ({ page }) => {
+  await page.goto('./lorem/');
+  await page.getByLabel('Unit').selectOption('words');
+  await page.getByLabel('Count').fill('12');
+  await page.getByRole('button', { name: 'Markdown' }).click();
+
+  // A real browser check: the page ships a strict CSP and a blob: download has
+  // to work under it.
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('lorem.md');
+
+  const path = await download.path();
+  const { readFileSync } = await import('node:fs');
+  expect(readFileSync(path, 'utf8').split(' ')).toHaveLength(12);
 });

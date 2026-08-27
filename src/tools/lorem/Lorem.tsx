@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { ToolShell } from '@shared/components/ToolShell.tsx';
 import { CopyButton } from '@shared/components/CopyButton.tsx';
+import { DownloadButton } from '@shared/components/DownloadButton.tsx';
 import { Segmented } from '@shared/components/Segmented.tsx';
 import { useHashState } from '@shared/hooks/useHashState.ts';
 import { FORMATS, MAX_COUNT, UNITS, generate, placeholderImage, type Format, type Unit } from './generate.ts';
@@ -24,6 +25,12 @@ const MODE_NAMES: Record<Mode, string> = {
   edge: 'Edge cases',
   fixtures: 'Entity fixtures',
   images: 'Placeholder images',
+};
+
+const DOWNLOAD_AS: Record<Format, { filename: string; type: string }> = {
+  text: { filename: 'lorem.txt', type: 'text/plain' },
+  html: { filename: 'lorem.html', type: 'text/html' },
+  markdown: { filename: 'lorem.md', type: 'text/markdown' },
 };
 
 const UNIT_NAMES: Record<Unit, string> = {
@@ -78,6 +85,8 @@ export function Lorem() {
   const scriptDef = scriptById(state.script);
   const isLengthUnit = state.unit === 'characters' || state.unit === 'bytes';
   const maxCount = MAX_COUNT[state.unit];
+  // Length units ignore the format, so they always save as plain text.
+  const downloadAs = DOWNLOAD_AS[isLengthUnit ? 'text' : state.format];
 
   const textOutput = useMemo(
     () =>
@@ -240,6 +249,7 @@ export function Lorem() {
                 {[...textOutput].length} chars · {new TextEncoder().encode(textOutput).length} bytes
               </span>
               <CopyButton value={textOutput} />
+              <DownloadButton value={textOutput} {...downloadAs} />
             </div>
             <pre class="output" dir={scriptDef.rtl && state.format !== 'html' ? 'rtl' : 'ltr'}>
               {textOutput}

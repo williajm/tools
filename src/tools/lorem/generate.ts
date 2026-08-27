@@ -94,13 +94,18 @@ function trimTo(text: string, limit: number, mode: 'characters' | 'bytes'): stri
 
 function padTo(rng: Rng, script: ScriptId, limit: number, mode: 'characters' | 'bytes'): string {
   // Build well past the target, then trim back — cheaper than measuring per word.
-  let text = '';
+  // Measure each chunk as it is added rather than the whole buffer each time,
+  // which was quadratic and noticeable at a few hundred thousand bytes.
   const measure = (s: string) =>
     mode === 'characters' ? [...s].length : new TextEncoder().encode(s).length;
 
+  let text = '';
+  let used = 0;
   let guard = 0;
-  while (measure(text) < limit && guard++ < 10000) {
-    text += (text ? ' ' : '') + paragraph(rng, script, 4);
+  while (used < limit && guard++ < 10000) {
+    const chunk = (text ? ' ' : '') + paragraph(rng, script, 4);
+    text += chunk;
+    used += measure(chunk);
   }
   return trimTo(text, limit, mode);
 }
@@ -138,17 +143,17 @@ function asMarkdown(blocks: string[], unit: Unit): string {
  * be silently cut short cannot be entered in the first place; generate() clamps
  * too for anything that bypasses the field, such as a hand-edited URL hash.
  *
- * Blocks and length budgets need different ceilings: 500 paragraphs is already
- * unreasonable, whereas 50,000 words or 100,000 characters is a legitimate
+ * Blocks and length budgets need different ceilings: 2,000 paragraphs is already
+ * unreasonable, whereas 200,000 words or 400,000 characters is a legitimate
  * request when you are testing a TEXT column limit or a long-document renderer.
  */
 export const MAX_COUNT: Readonly<Record<Unit, number>> = {
-  paragraphs: 500,
-  sentences: 5000,
-  words: 50000,
-  'list-items': 1000,
-  characters: 100000,
-  bytes: 100000,
+  paragraphs: 2000,
+  sentences: 20000,
+  words: 200000,
+  'list-items': 4000,
+  characters: 400000,
+  bytes: 400000,
 };
 
 export function generate(options: Options): string {
