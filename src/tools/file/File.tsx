@@ -5,6 +5,7 @@ import { Segmented } from '@shared/components/Segmented.tsx';
 import { useHashState } from '@shared/hooks/useHashState.ts';
 import { saveBlob } from '@shared/lib/download.ts';
 import {
+  DEFAULT_REQUEST,
   FILLS,
   FILL_NAMES,
   FILL_NOTES,
@@ -12,24 +13,28 @@ import {
   SIZE_UNITS,
   generateFile,
   maxFor,
+  normalise,
   suggestedFilename,
   toBytes,
-  type Fill,
   type Generated,
+  type Request,
   type SizeUnit,
 } from './file.ts';
 
-interface State {
-  size: number;
-  unit: SizeUnit;
-  fill: Fill;
+interface State extends Request {
   /** Empty means "use the suggested name". */
   filename: string;
 }
 
-const INITIAL: State = { size: 10, unit: 'MiB', fill: 'random', filename: '' };
+const INITIAL: State = { ...DEFAULT_REQUEST, filename: '' };
 
 type Phase = 'idle' | 'working' | 'done' | 'failed';
+
+/** What a run was asked for, frozen at the click so progress describes that job. */
+interface Job {
+  bytes: number;
+  filename: string;
+}
 
 function formatMiB(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MiB`;
@@ -40,14 +45,18 @@ export function TestFile() {
   const set = <K extends keyof State>(key: K, value: State[K]) => setState({ ...state, [key]: value });
 
   const [phase, setPhase] = useState<Phase>('idle');
+  const [job, setJob] = useState<Job | null>(null);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<(Generated & { filename: string }) | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const bytes = toBytes(state.size, state.unit);
-  const max = maxFor(state.unit);
-  const filename = state.filename.trim() || suggestedFilename(state.size, state.unit, state.fill);
-  const canGenerate = bytes >= 1 && bytes <= MAX_BYTES && phase !== 'working';
+  // The fragment is hand-editable, so never trust it to be one of our values.
+  const { size, unit, fill } = normalise(state);
+  const bytes = toBytes(size, unit);
+  const max = maxFor(unit);
+  const filename = state.filename.trim() || suggestedFilename(size, unit, fill);
+  const busy = phase === 'working';
+  const canGenerate = bytes >= 1 && bytes <= MAX_BYTES && !busy;
 
   const onSize = (raw: string) => {
     // A number field reports '' while a decimal is half-typed ("2."); writing
@@ -57,20 +66,22 @@ export function TestFile() {
     set('size', Math.min(n, max));
   };
 
-  const onUnit = (unit: SizeUnit) => {
+  const onUnit = (next: SizeUnit) => {
     // Each unit has its own ceiling; keep the size inside the new one.
-    setState({ ...state, unit, size: Math.min(state.size, maxFor(unit)) });
+    setState({ ...state, unit: next, size: Math.min(size, maxFor(next)) });
   };
 
   const run = async () => {
+    const thisJob: Job = { bytes, filename };
+    setJob(thisJob);
     setPhase('working');
     setProgress(0);
     setResult(null);
     setError(null);
     try {
-      const generated = await generateFile(bytes, state.fill, setProgress);
-      saveBlob(generated.blob, filename);
-      setResult({ ...generated, filename });
+      const generated = await generateFile(thisJob.bytes, fill, setProgress);
+      saveBlob(generated.blob, thisJob.filename);
+      setResult({ ...generated, filename: thisJob.filename });
       setPhase('done');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -89,14 +100,19 @@ export function TestFile() {
               min={1}
               max={max}
               step="any"
-              value={state.size}
-              title={`Up to ${max.toLocaleString()} ${state.unit}`}
+              value={size}
+              disabled={busy}
+              title={`Up to ${max.toLocaleString()} ${unit}`}
               onInput={(e) => onSize((e.target as HTMLInputElement).value)}
             />
           </label>
           <label class="row row--tight small">
             <span class="field__label">Unit</span>
-            <select value={state.unit} onChange={(e) => onUnit((e.target as HTMLSelectElement).value as SizeUnit)}>
+            <select
+              value={unit}
+              disabled={busy}
+              onChange={(e) => onUnit((e.target as HTMLSelectElement).value as SizeUnit)}
+            >
               {SIZE_UNITS.map((u) => (
                 <option key={u} value={u}>
                   {u}
@@ -110,10 +126,17 @@ export function TestFile() {
         </div>
 
         <div class="row">
-          <Segmented label="Fill" options={FILLS} value={state.fill} names={FILL_NAMES} onChange={(f) => set('fill', f)} />
+          <Segmented
+            label="Fill"
+            options={FILLS}
+            value={fill}
+            names={FILL_NAMES}
+            disabled={busy}
+            onChange={(f) => set('fill', f)}
+          />
         </div>
 
-        <div class="note note--ok small">{FILL_NOTES[state.fill]}</div>
+        <div class="note note--ok small">{FILL_NOTES[fill]}</div>
 
         <div class="row">
           <label class="row row--tight small">
@@ -121,21 +144,22 @@ export function TestFile() {
             <input
               type="text"
               value={state.filename}
-              placeholder={suggestedFilename(state.size, state.unit, state.fill)}
+              disabled={busy}
+              placeholder={suggestedFilename(size, unit, fill)}
               style="width:16rem"
               onInput={(e) => set('filename', (e.target as HTMLInputElement).value)}
             />
           </label>
           <button type="button" class="primary" disabled={!canGenerate} onClick={run}>
-            {phase === 'working' ? 'Generating…' : 'Generate & download'}
+            {busy ? 'Generating…' : 'Generate & download'}
           </button>
         </div>
 
-        {phase === 'working' && (
+        {busy && job && (
           <div class="stack stack--tight">
-            <progress value={progress} max={bytes} style="width:100%" />
+            <progress value={progress} max={job.bytes} style="width:100%" />
             <span class="small dim">
-              {formatMiB(progress)} of {formatMiB(bytes)}
+              {formatMiB(progress)} of {formatMiB(job.bytes)}
             </span>
           </div>
         )}

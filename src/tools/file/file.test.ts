@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { MAX_BYTES, generateFile, maxFor, suggestedFilename, toBytes } from './file.ts';
+import { DEFAULT_REQUEST, MAX_BYTES, generateFile, maxFor, normalise, suggestedFilename, toBytes } from './file.ts';
 
 const nodeSha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -17,11 +17,24 @@ describe('sizes', () => {
     expect(toBytes(1.0004, 'KB')).toBe(1000);
   });
 
-  it('caps every unit at 1 GiB', () => {
+  it('caps every unit at exactly 1 GiB, fractions included', () => {
     expect(maxFor('B')).toBe(MAX_BYTES);
     expect(maxFor('MiB')).toBe(1024);
-    expect(maxFor('MB')).toBe(1073);
-    expect(toBytes(maxFor('MB'), 'MB')).toBeLessThanOrEqual(MAX_BYTES);
+    // Regression: flooring to 1073 MB made 1073.5 MB unreachable although it is under the limit.
+    expect(maxFor('MB')).toBeCloseTo(1073.741824, 6);
+    expect(toBytes(maxFor('MB'), 'MB')).toBe(MAX_BYTES);
+  });
+
+  it('normalises state a hand-edited URL could carry', () => {
+    const good = { size: 2.5, unit: 'MB', fill: 'zeros' } as const;
+    expect(normalise(good)).toEqual(good);
+    // Each bad field falls back on its own; the others survive.
+    expect(normalise({ size: 3, unit: 'GB' as never, fill: 'zeros' })).toEqual({ size: 3, unit: DEFAULT_REQUEST.unit, fill: 'zeros' });
+    expect(normalise({ size: 3, unit: 'B', fill: 'ones' as never })).toEqual({ size: 3, unit: 'B', fill: DEFAULT_REQUEST.fill });
+    for (const size of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(normalise({ size, unit: 'B', fill: 'zeros' }).size).toBe(DEFAULT_REQUEST.size);
+    }
+    expect(normalise({ size: 5000, unit: 'MiB', fill: 'random' }).size).toBe(1024);
   });
 
   it('names the file after what it contains', () => {

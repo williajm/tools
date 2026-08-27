@@ -351,3 +351,31 @@ test('the test-file tool downloads a file of the exact size and shows its SHA-25
   expect(data.some((b) => b !== 0)).toBe(true);
   await expect(page.getByText(createHash('sha256').update(data).digest('hex'))).toBeVisible();
 });
+
+test('the test-file tool survives a fragment with values it does not know', async ({ page }) => {
+  // Regression: an unknown unit made every limit NaN and disabled the button for good.
+  const fragment = btoa(encodeURIComponent(JSON.stringify({ size: 3, unit: 'GB', fill: 'ones', filename: '' })));
+  await page.goto(`./file/#${fragment}`);
+
+  await expect(page.getByLabel('Unit')).toHaveValue('MiB');
+  await expect(page.getByRole('button', { name: 'Random bytes' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Generate & download' })).toBeEnabled();
+});
+
+test('the test-file tool locks its inputs while a file is being built', async ({ page }) => {
+  await page.goto('./file/');
+  await page.getByLabel('Unit').selectOption('MiB');
+  await page.getByLabel('Size').fill('256');
+
+  // Regression: the controls stayed live during a run, so changing the size
+  // made the progress bar describe a job that was not the one running.
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Generate & download' }).click();
+  await expect(page.getByLabel('Size')).toBeDisabled();
+  await expect(page.getByLabel('Unit')).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Zero bytes' })).toBeDisabled();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('max', String(256 * 1024 * 1024));
+
+  expect((await downloadPromise).suggestedFilename()).toBe('random-256MiB.bin');
+  await expect(page.getByLabel('Size')).toBeEnabled();
+});

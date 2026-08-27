@@ -54,9 +54,36 @@ export function toBytes(size: number, unit: SizeUnit): number {
   return Math.round(size * UNIT_BYTES[unit]);
 }
 
-/** Largest value the size field accepts in `unit` without exceeding MAX_BYTES. */
+/**
+ * Largest value the size field accepts in `unit` without exceeding MAX_BYTES.
+ * Not floored: the field takes decimals, and 1073.5 MB is under the limit.
+ */
 export function maxFor(unit: SizeUnit): number {
-  return Math.floor(MAX_BYTES / UNIT_BYTES[unit]);
+  return MAX_BYTES / UNIT_BYTES[unit];
+}
+
+export interface Request {
+  size: number;
+  unit: SizeUnit;
+  fill: Fill;
+}
+
+export const DEFAULT_REQUEST: Request = { size: 10, unit: 'MiB', fill: 'random' };
+
+/**
+ * Reconciles state from the URL fragment, which only guarantees the field
+ * types. An unknown unit would make every limit NaN and disable the page; an
+ * unknown fill would select nothing yet still generate. Each bad field falls
+ * back to its default independently and the size is kept inside the ceiling.
+ */
+export function normalise(request: Request): Request {
+  const unit = SIZE_UNITS.includes(request.unit) ? request.unit : DEFAULT_REQUEST.unit;
+  const fill = FILLS.includes(request.fill) ? request.fill : DEFAULT_REQUEST.fill;
+  const size =
+    Number.isFinite(request.size) && request.size > 0
+      ? Math.min(request.size, maxFor(unit))
+      : DEFAULT_REQUEST.size;
+  return { size, unit, fill };
 }
 
 export function suggestedFilename(size: number, unit: SizeUnit, fill: Fill): string {
