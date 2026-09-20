@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ToolShell } from '@shared/components/ToolShell.tsx';
 import { CopyButton } from '@shared/components/CopyButton.tsx';
 import { Segmented } from '@shared/components/Segmented.tsx';
-import { useHashState } from '@shared/hooks/useHashState.ts';
 import {
   checkAlgorithm,
   decode,
@@ -35,12 +34,24 @@ const KEY_PLACEHOLDERS: Record<KeyFormat, string> = {
 };
 
 export function Jwt() {
-  // Only the token goes in the URL; the key never does.
-  const [state, setState] = useHashState<{ token: string }>({ token: '' });
-  const token = state.token;
+  // A bearer token is itself a credential, just like the verification key.
+  const [token, setToken] = useState('');
 
   const [keyFormat, setKeyFormat] = useState<KeyFormat>('secret');
   const [keyInput, setKeyInput] = useState('');
+
+  useEffect(() => {
+    // Old share links contain tokens. Remove their fragments from the current
+    // history entry without importing the token, including on back/forward.
+    const clearFragment = () => {
+      if (window.location.hash) {
+        history.replaceState(history.state, '', window.location.pathname + window.location.search);
+      }
+    };
+    clearFragment();
+    window.addEventListener('hashchange', clearFragment);
+    return () => window.removeEventListener('hashchange', clearFragment);
+  }, []);
 
   // Interpretation runs inside the try alongside decoding, not after it. A
   // pasted token is untrusted input, and anything that throws while a claim is
@@ -112,9 +123,14 @@ export function Jwt() {
             spellcheck={false}
             placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…"
             style="min-height:110px"
-            onInput={(e) => setState({ token: (e.target as HTMLTextAreaElement).value })}
+            onInput={(e) => setToken((e.target as HTMLTextAreaElement).value)}
           />
         </label>
+
+        <p class="small faint" style="margin:0">
+          The token and key stay in this tab and are cleared on reload. Neither is saved in the URL
+          or browser storage.
+        </p>
 
         {decoded && 'error' in decoded && <div class="note note--error">{decoded.error}</div>}
 

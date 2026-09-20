@@ -8,9 +8,13 @@ never leaves the machine.
 
 That claim is enforced rather than promised: every page ships a
 `connect-src 'none'` Content Security Policy, so the browser itself refuses to
-let these tools make a network request. Tool state lives in the URL fragment,
+let these tools make a network request. Shareable tool state lives in the URL fragment,
 which browsers never send to a server, so sharing a link and uploading nothing
 are simultaneously true.
+
+JWT tokens and verification keys stay in memory and are cleared on reload. The
+JWT tool does not create or restore share links; it removes fragments from old
+links when they are opened. HMAC keys and QR payloads also stay out of URLs.
 
 ## The tools
 
