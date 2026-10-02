@@ -1,19 +1,17 @@
 version: 2
 
-# Scoped deliberately to GitHub Actions only.
-#
-# npm is left to Dependabot's security updates, which raise a PR for an advisory
-# and nothing else — routine version churn on a static site is noise. Actions are
-# different: they are pinned to commit SHAs for supply-chain safety, and a SHA
-# carries no semver, so nothing would ever tell us a pin had gone stale. This is
-# what keeps those pins moving.
+# Security updates only for npm and GitHub Actions.
+# npm uses the repository's enabled Dependabot security updates directly.
+# Actions keep their SHA pins, with routine version-update PRs disabled below.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     groups:
       actions:
+        applies-to: security-updates
         patterns: ['*']
     commit-message:
       prefix: ci
