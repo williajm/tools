@@ -47,12 +47,12 @@
     "@preact/preset-vite": "^2.10.2",
     "@types/luxon": "^3.7.1",
     "@types/qrcode": "^1.5.5",
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/coverage-v8": "^5.0.5",
     "fast-check": "^4.3.0",
     "jsdom": "^26.1.0",
     "rollup-plugin-license": "^3.6.0",
     "typescript": "^5.9.3",
-    "vite": "^6.3.6",
-    "vitest": "^5.0.1"
+    "vite": "^6.4.4",
+    "vitest": "^5.0.5"
   }
 }
